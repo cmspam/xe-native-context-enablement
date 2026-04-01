@@ -67,10 +67,10 @@ index 5085af1..beaa44d 100644
  
  inc_intel_dev_virtio += [
 diff --git a/src/intel/dev/virtio/i915_virtio_ccmd.c b/src/intel/dev/virtio/i915_virtio_ccmd.c
-index bfc8cc5..b14fe25 100644
+index bfc8cc5..f836f47 100644
 --- a/src/intel/dev/virtio/i915_virtio_ccmd.c
 +++ b/src/intel/dev/virtio/i915_virtio_ccmd.c
-@@ -705,6 +705,72 @@ intel_virtio_ioctl(int fd, unsigned long cmd, void *req)
+@@ -705,6 +705,71 @@ intel_virtio_ioctl(int fd, unsigned long cmd, void *req)
  
     int orig_errno = errno;
  
@@ -128,8 +128,7 @@ index bfc8cc5..b14fe25 100644
 +         errno = 0;
 +         goto out;
 +      case IOC_MASKED_XE(DRM_IOCTL_XE_GEM_MMAP_OFFSET):
-+         /* mmap offset not needed - vdrm_bo_map handles mapping */
-+         errno = 0;
++         errno = xe_virtio_gem_mmap_offset(dev, req);
 +         goto out;
 +      default:
 +         mesa_loge("unsupported Xe ioctl 0x%lx\n", _IOC_NR(cmd));
@@ -229,7 +228,7 @@ index 07dda2a..910e664 100644
  
     if (!dev->vdrm) {
 diff --git a/src/intel/dev/virtio/intel_virtio_priv.h b/src/intel/dev/virtio/intel_virtio_priv.h
-index f520beb..13f02e7 100644
+index f520beb..c13c485 100644
 --- a/src/intel/dev/virtio/intel_virtio_priv.h
 +++ b/src/intel/dev/virtio/intel_virtio_priv.h
 @@ -18,6 +18,7 @@
@@ -248,7 +247,7 @@ index f520beb..13f02e7 100644
  };
  
  struct intel_virtio_device *fd_to_intel_virtio_device(int fd);
-@@ -64,4 +66,25 @@ struct intel_virtio_device *fd_to_intel_virtio_device(int fd);
+@@ -64,4 +66,27 @@ struct intel_virtio_device *fd_to_intel_virtio_device(int fd);
  int i915_virtio_gem_execbuffer2(struct intel_virtio_device *dev,
                                  struct drm_i915_gem_execbuffer2 *exec);
  
@@ -258,6 +257,8 @@ index f520beb..13f02e7 100644
 +                         struct drm_xe_gem_create *args);
 +int xe_virtio_gem_close(struct intel_virtio_device *dev,
 +                        struct drm_gem_close *args);
++int xe_virtio_gem_mmap_offset(struct intel_virtio_device *dev,
++                               struct drm_xe_gem_mmap_offset *args);
 +int xe_virtio_vm_create(struct intel_virtio_device *dev,
 +                        struct drm_xe_vm_create *args);
 +int xe_virtio_vm_destroy(struct intel_virtio_device *dev,
@@ -276,10 +277,10 @@ index f520beb..13f02e7 100644
  #endif /* INTEL_VIRTIO_PRIV_H_ */
 diff --git a/src/intel/dev/virtio/xe_virtio_ccmd.c b/src/intel/dev/virtio/xe_virtio_ccmd.c
 new file mode 100644
-index 0000000..ecec0d6
+index 0000000..9fdfe13
 --- /dev/null
 +++ b/src/intel/dev/virtio/xe_virtio_ccmd.c
-@@ -0,0 +1,340 @@
+@@ -0,0 +1,357 @@
 +/*
 + * Copyright 2025 Collabora, Ltd.
 + * SPDX-License-Identifier: MIT
@@ -352,6 +353,23 @@ index 0000000..ecec0d6
 +                    struct drm_gem_close *args)
 +{
 +   vdrm_bo_close(dev->vdrm, args->handle);
++   return 0;
++}
++
++int
++xe_virtio_gem_mmap_offset(struct intel_virtio_device *dev,
++                           struct drm_xe_gem_mmap_offset *args)
++{
++   /* On virtio, we use VIRTGPU_MAP to get an mmap offset for the BO. */
++   struct drm_virtgpu_map map_req = {
++      .handle = args->handle,
++   };
++
++   int ret = drmIoctl(dev->fd, DRM_IOCTL_VIRTGPU_MAP, &map_req);
++   if (ret)
++      return errno;
++
++   args->offset = map_req.offset;
 +   return 0;
 +}
 +
