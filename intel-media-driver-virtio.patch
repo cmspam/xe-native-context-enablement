@@ -1,0 +1,1609 @@
+diff --git a/media_driver/media_top_cmake.cmake b/media_driver/media_top_cmake.cmake
+index 2dcd0fb..0a6f1fa 100755
+--- a/media_driver/media_top_cmake.cmake
++++ b/media_driver/media_top_cmake.cmake
+@@ -622,14 +622,14 @@ set_target_properties(${LIB_NAME_STATIC} PROPERTIES OUTPUT_NAME ${LIB_NAME})
+ 
+ option(MEDIA_BUILD_FATAL_WARNINGS "Turn compiler warnings into fatal errors" ON)
+ if(MEDIA_BUILD_FATAL_WARNINGS)
+-    set_target_properties(${LIB_NAME}_COMMON PROPERTIES COMPILE_FLAGS "-Werror")
+-    set_target_properties(${LIB_NAME}_CODEC PROPERTIES COMPILE_FLAGS "-Werror")
+-    set_target_properties(${LIB_NAME}_VP PROPERTIES COMPILE_FLAGS "-Werror")
+-    set_target_properties(${LIB_NAME}_CP PROPERTIES COMPILE_FLAGS "-Werror")
+-    set_target_properties(${LIB_NAME}_mos PROPERTIES COMPILE_FLAGS "-Werror")
+-    set_target_properties(${LIB_NAME}_SOFTLET_VP PROPERTIES COMPILE_FLAGS "-Werror")
+-    set_target_properties(${LIB_NAME}_SOFTLET_CODEC PROPERTIES COMPILE_FLAGS "-Werror")
+-    set_target_properties(${LIB_NAME}_SOFTLET_COMMON PROPERTIES COMPILE_FLAGS "-Werror")
++    set_target_properties(${LIB_NAME}_COMMON PROPERTIES COMPILE_FLAGS "-Wno-error")
++    set_target_properties(${LIB_NAME}_CODEC PROPERTIES COMPILE_FLAGS "-Wno-error")
++    set_target_properties(${LIB_NAME}_VP PROPERTIES COMPILE_FLAGS "-Wno-error")
++    set_target_properties(${LIB_NAME}_CP PROPERTIES COMPILE_FLAGS "-Wno-error")
++    set_target_properties(${LIB_NAME}_mos PROPERTIES COMPILE_FLAGS "-Wno-error")
++    set_target_properties(${LIB_NAME}_SOFTLET_VP PROPERTIES COMPILE_FLAGS "-Wno-error")
++    set_target_properties(${LIB_NAME}_SOFTLET_CODEC PROPERTIES COMPILE_FLAGS "-Wno-error")
++    set_target_properties(${LIB_NAME}_SOFTLET_COMMON PROPERTIES COMPILE_FLAGS "-Wno-error")
+ endif()
+ 
+ set(MEDIA_LINK_FLAGS "-Wl,--no-as-needed -Wl,--gc-sections -z relro -z now -fPIC")
+diff --git a/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h b/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h
+index 4e67df8..cda1d05 100644
+--- a/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h
++++ b/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h
+@@ -32,6 +32,7 @@
+ #include "drm.h"
+ #include "libdrm_macros.h"
+ #include "media_skuwa_specific.h"
++#include "mos_xe_virtio.h"
+ 
+ #define S_SUCCESS 0
+ 
+@@ -423,10 +424,10 @@ static inline int mos_query_device_type(int fd)
+ {
+     int device_type = DEVICE_TYPE_COUNT;
+     drm_version_t version;
+-    char name[5] = "";
++    char name[16] = "";
+ 
+     memset(&version, 0, sizeof(version));
+-    version.name_len = 4;
++    version.name_len = sizeof(name) - 1;
+     version.name = name;
+ 
+     if (drmIoctl(fd, DRM_IOCTL_VERSION, &version))
+@@ -443,6 +444,10 @@ static inline int mos_query_device_type(int fd)
+     {
+         device_type = DEVICE_TYPE_XE;
+     }
++    else if(strcmp("virtio_gpu", name) == 0 && mos_xe_virtio_probe(fd))
++    {
++        device_type = DEVICE_TYPE_XE;
++    }
+     else
+     {
+         fprintf(stderr, "DRM_IOCTL_VERSION, unsupported drm device by media driver: %s\n", name);
+diff --git a/media_softlet/linux/common/os/xe/media_srcs.cmake b/media_softlet/linux/common/os/xe/media_srcs.cmake
+index 9f88489..43238a0 100644
+--- a/media_softlet/linux/common/os/xe/media_srcs.cmake
++++ b/media_softlet/linux/common/os/xe/media_srcs.cmake
+@@ -24,10 +24,12 @@ set(TMP_SOURCES_
+     ${CMAKE_CURRENT_LIST_DIR}/mos_bufmgr_xe.c
+     ${CMAKE_CURRENT_LIST_DIR}/mos_synchronization_xe.c
+     ${CMAKE_CURRENT_LIST_DIR}/mos_gpucontext_specific_next_xe.cpp
++    ${CMAKE_CURRENT_LIST_DIR}/mos_xe_virtio.c
+ )
+ 
+ set(TMP_HEADERS_
+     ${CMAKE_CURRENT_LIST_DIR}/mos_gpucontext_specific_next_xe.h
++    ${CMAKE_CURRENT_LIST_DIR}/mos_xe_virtio.h
+ )
+ 
+ set(SOFTLET_MOS_COMMON_SOURCES_
+diff --git a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c
+index 026d7b0..d4d3929 100644
+--- a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c
++++ b/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c
+@@ -65,6 +65,7 @@
+ #include "config.h"
+ #endif
+ #include "mos_bufmgr_api.h"
++#include "mos_xe_virtio.h"
+ #include "mos_util_debug.h"
+ #include "intel_hwconfig_types.h"
+ #include "xf86drm.h"
+@@ -490,7 +491,7 @@ __mos_query_gt_list_xe(int fd)
+     memclear(query);
+     query.query = DRM_XE_DEVICE_QUERY_GT_LIST;
+ 
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY,
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_DEVICE_QUERY,
+                 &query);
+     if (ret || !query.size)
+     {
+@@ -501,7 +502,7 @@ __mos_query_gt_list_xe(int fd)
+     MOS_DRM_CHK_NULL_RETURN_VALUE(gt_list, nullptr);
+ 
+     query.data = (uintptr_t)(gt_list);
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY,
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_DEVICE_QUERY,
+                 &query);
+     if (ret || !query.size || 0 == gt_list->num_gt)
+     {
+@@ -545,7 +546,7 @@ __mos_query_mem_regions_xe(int fd)
+     memclear(query);
+     query.query = DRM_XE_DEVICE_QUERY_MEM_REGIONS;
+ 
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY,
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_DEVICE_QUERY,
+                 &query);
+     if (ret || !query.size)
+     {
+@@ -556,7 +557,7 @@ __mos_query_mem_regions_xe(int fd)
+     MOS_DRM_CHK_NULL_RETURN_VALUE(mem_regions, nullptr);
+ 
+     query.data = (uintptr_t)(mem_regions);
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query);
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query);
+     if (ret || !query.size || 0 == mem_regions->num_mem_regions)
+     {
+         MOS_XE_SAFE_FREE(mem_regions);
+@@ -601,7 +602,7 @@ __mos_query_config_xe(int fd)
+ 
+     memclear(query);
+     query.query = DRM_XE_DEVICE_QUERY_CONFIG;
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, (void *)&query);
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, (void *)&query);
+     if (ret || !query.size)
+     {
+         return nullptr;
+@@ -619,7 +620,7 @@ __mos_query_config_xe(int fd)
+     }
+ 
+     query.data = (uintptr_t)config;
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, (void *)&query);
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, (void *)&query);
+     if (ret || !query.size || 0 == config->num_params)
+     {
+         MOS_XE_SAFE_FREE(config);
+@@ -691,7 +692,7 @@ mos_query_uc_version_xe(struct mos_bufmgr *bufmgr, struct mos_drm_uc_version *ve
+             dev->uc_versions[version->uc_type].uc_type = version->uc_type;
+             query.data = (uintptr_t)&dev->uc_versions[version->uc_type];
+ 
+-            ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_DEVICE_QUERY,
++            ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_DEVICE_QUERY,
+                         &query);
+             if (ret)
+             {
+@@ -825,7 +826,7 @@ __mos_vm_create_xe(struct mos_bufmgr *bufmgr)
+     int ret;
+ 
+     memclear(vm);
+-    ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_VM_CREATE, &vm);
++    ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_VM_CREATE, &vm);
+     if (ret != 0)
+     {
+         MOS_DRM_ASSERTMESSAGE("DRM_IOCTL_XE_VM_CREATE failed: %s",
+@@ -851,7 +852,7 @@ __mos_vm_destroy_xe(struct mos_bufmgr *bufmgr, uint32_t vm_id)
+ 
+     memclear(vm_destroy);
+     vm_destroy.vm_id = vm_id;
+-    ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_VM_DESTROY, &vm_destroy);
++    ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_VM_DESTROY, &vm_destroy);
+     if (ret != 0)
+     {
+         MOS_DRM_ASSERTMESSAGE("DRM_IOCTL_XE_VM_DESTROY failed: %s",
+@@ -965,7 +966,7 @@ mos_context_create_shared_xe(
+     
+     create.extensions = (uintptr_t)ext;
+ 
+-    ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC_QUEUE_CREATE, &create);
++    ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC_QUEUE_CREATE, &create);
+ 
+     MOS_DRM_CHK_STATUS_MESSAGE_RETURN_VALUE_WH_OP(ret, context, MOS_Delete, nullptr,
+                 "ioctl failed in DRM_IOCTL_XE_EXEC_QUEUE_CREATE, return error(%d)", ret);
+@@ -1056,7 +1057,7 @@ mos_context_destroy_xe(struct mos_linux_context *ctx)
+     memclear(exec_queue_destroy);
+     exec_queue_destroy.exec_queue_id = ctx->ctx_id;
+ 
+-    ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC_QUEUE_DESTROY, &exec_queue_destroy);
++    ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC_QUEUE_DESTROY, &exec_queue_destroy);
+     if (ret != 0)
+         MOS_DRM_ASSERTMESSAGE("DRM_IOCTL_XE_EXEC_QUEUE_DESTROY failed: %s", strerror(errno));
+ 
+@@ -1106,7 +1107,7 @@ __mos_context_restore_xe(struct mos_bufmgr *bufmgr,
+     create.vm_id = context->ctx.vm_id;
+     create.flags = context->flags;
+     create.instances = (uintptr_t)engine_map;
+-    ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC_QUEUE_CREATE, &create);
++    ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC_QUEUE_CREATE, &create);
+     MOS_DRM_CHK_STATUS_MESSAGE_RETURN(ret,
+                 "ioctl failed in DRM_IOCTL_XE_EXEC_QUEUE_CREATE of restore, return error(%d)", ret)
+ 
+@@ -1114,7 +1115,7 @@ __mos_context_restore_xe(struct mos_bufmgr *bufmgr,
+     struct drm_xe_exec_queue_destroy exec_queue_destroy;
+     memclear(exec_queue_destroy);
+     exec_queue_destroy.exec_queue_id = ctx->ctx_id;
+-    ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC_QUEUE_DESTROY, &exec_queue_destroy);
++    ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC_QUEUE_DESTROY, &exec_queue_destroy);
+     MOS_DRM_CHK_STATUS_MESSAGE_RETURN(ret,
+                 "ioctl failed in DRM_IOCTL_XE_EXEC_QUEUE_DESTROY of restore, return error(%d)", ret)
+ 
+@@ -1146,7 +1147,7 @@ __mos_get_context_property_xe(struct mos_bufmgr *bufmgr,
+     p.property = property;
+     p.exec_queue_id = ctx->ctx_id;
+ 
+-    int ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC_QUEUE_GET_PROPERTY, &p);
++    int ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC_QUEUE_GET_PROPERTY, &p);
+ 
+     value = p.value;
+     return ret;
+@@ -1247,7 +1248,7 @@ static int __mos_vm_bind_xe(int fd, uint32_t vm_id, uint32_t exec_queue_id, uint
+     bind.num_syncs = num_syncs;
+     bind.syncs = (uintptr_t)sync;
+ 
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_VM_BIND, &bind);
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_VM_BIND, &bind);
+     if (ret)
+     {
+         MOS_DRM_ASSERTMESSAGE("Failed to bind vm, vm_id:%d, exec_queue_id:%d, op:0x%x, flags:0x%x, bo_handle:%d, offset:%lx, addr:0x%lx, size:%ld, pat_index:%d, errno(%d)",
+@@ -1373,7 +1374,7 @@ mos_bo_alloc_xe(struct mos_bufmgr *bufmgr,
+         create.flags |= DRM_XE_GEM_CREATE_FLAG_SCANOUT;
+     }
+ 
+-    ret = drmIoctl(bufmgr_gem->fd,
++    ret = mos_xe_ioctl(bufmgr_gem->fd,
+         DRM_IOCTL_XE_GEM_CREATE,
+         &create);
+     MOS_DRM_CHK_STATUS_MESSAGE_RETURN_VALUE_WH_OP(ret, bo_gem, MOS_Delete, nullptr,
+@@ -2051,25 +2052,39 @@ mos_bo_map_xe(struct mos_linux_bo *bo, int write_enable)
+     bufmgr_gem->m_lock.lock();
+     if (nullptr == bo_gem->mem_virtual)
+     {
+-        struct drm_xe_gem_mmap_offset mmo;
+-        memclear(mmo);
+-        mmo.handle = bo->handle;
+-        ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_GEM_MMAP_OFFSET, &mmo);
+-        if (ret)
++        if (mos_xe_virtio_is_active(bufmgr_gem->fd))
+         {
+-            bufmgr_gem->m_lock.unlock();
+-            return ret;
++            bo_gem->mem_virtual = mos_xe_gem_mmap(bufmgr_gem->fd, bo->handle, bo->size);
++            if (nullptr == bo_gem->mem_virtual)
++            {
++                ret = -errno;
++                MOS_DRM_ASSERTMESSAGE("Error mapping buffer %d (%s) via virtio: %s .",
++                    bo_gem->gem_handle, bo_gem->name,
++                    strerror(errno));
++            }
+         }
+-
+-        bo_gem->mem_virtual = drm_mmap(0, bo->size, PROT_READ | PROT_WRITE,
+-            MAP_SHARED, bufmgr_gem->fd, mmo.offset);
+-        if (MAP_FAILED == bo_gem->mem_virtual)
++        else
+         {
+-            bo_gem->mem_virtual = nullptr;
+-            ret = -errno;
+-            MOS_DRM_ASSERTMESSAGE("Error mapping buffer %d (%s): %s .",
+-                bo_gem->gem_handle, bo_gem->name,
+-                strerror(errno));
++            struct drm_xe_gem_mmap_offset mmo;
++            memclear(mmo);
++            mmo.handle = bo->handle;
++            ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_GEM_MMAP_OFFSET, &mmo);
++            if (ret)
++            {
++                bufmgr_gem->m_lock.unlock();
++                return ret;
++            }
++
++            bo_gem->mem_virtual = drm_mmap(0, bo->size, PROT_READ | PROT_WRITE,
++                MAP_SHARED, bufmgr_gem->fd, mmo.offset);
++            if (MAP_FAILED == bo_gem->mem_virtual)
++            {
++                bo_gem->mem_virtual = nullptr;
++                ret = -errno;
++                MOS_DRM_ASSERTMESSAGE("Error mapping buffer %d (%s): %s .",
++                    bo_gem->gem_handle, bo_gem->name,
++                    strerror(errno));
++            }
+         }
+     }
+ 
+@@ -2430,7 +2445,7 @@ __mos_bo_context_exec_retry_xe(struct mos_bufmgr *bufmgr,
+         curr_exec_queue_id = ctx->ctx_id;
+         exec.exec_queue_id = curr_exec_queue_id;
+         //try once again to submit
+-        ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC, &exec);
++        ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC, &exec);
+         if (ret)
+         {
+             MOS_DRM_ASSERTMESSAGE("Failed to re-submission in DRM_IOCTL_XE_EXEC(errno:%d): new exec_queue_id = %d",
+@@ -2563,7 +2578,7 @@ mos_bo_context_exec_with_sync_xe(struct mos_linux_bo **bo, int num_bo, struct mo
+     */
+     exec.address = (num_bo == 1 ? (uintptr_t)batch_addrs[0] : (uintptr_t)batch_addrs);
+     exec.num_batch_buffer = num_bo;
+-    ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC, &exec);
++    ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_XE_EXEC, &exec);
+     if (ret)
+     {
+         MOS_DRM_ASSERTMESSAGE("Failed to submission in DRM_IOCTL_XE_EXEC(errno:%d): exec_queue_id = %d, num_syncs = %d, num_bo = %d",
+@@ -2661,7 +2676,7 @@ __mos_query_engines_xe(int fd)
+     query.size = 0;
+     query.data = 0;
+ 
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query);
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query);
+     if (ret || !query.size)
+     {
+         MOS_DRM_ASSERTMESSAGE("ret:%d, length:%d", ret, query.size);
+@@ -2672,7 +2687,7 @@ __mos_query_engines_xe(int fd)
+     MOS_DRM_CHK_NULL_RETURN_VALUE(engines, nullptr)
+ 
+     query.data = (uintptr_t)engines;
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query);
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query);
+     if (ret || !query.size)
+     {
+         MOS_DRM_ASSERTMESSAGE("ret:%d, length:%d", ret, query.size);
+@@ -2865,7 +2880,7 @@ __mos_query_hw_config_xe(int fd)
+     memclear(query);
+     query.query = DRM_XE_DEVICE_QUERY_HWCONFIG;
+ 
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query);
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query);
+     if (ret || !query.size)
+     {
+         MOS_DRM_ASSERTMESSAGE("ret:%d, length:%d", ret, query.size);
+@@ -2876,7 +2891,7 @@ __mos_query_hw_config_xe(int fd)
+     MOS_DRM_CHK_NULL_RETURN_VALUE(hw_config, nullptr)
+ 
+     query.data = (uintptr_t)&hw_config[1];
+-    ret = drmIoctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query);
++    ret = mos_xe_ioctl(fd, DRM_IOCTL_XE_DEVICE_QUERY, &query);
+     if (ret != 0 || query.size <= 0)
+     {
+         MOS_DRM_ASSERTMESSAGE("ret:%d, length:%d", ret, query.size);
+@@ -3043,7 +3058,7 @@ mos_bo_free_xe(struct mos_linux_bo *bo)
+         /* Close this object */
+          memclear(close_ioctl);
+          close_ioctl.handle = bo_gem->gem_handle;
+-         ret = drmIoctl(bufmgr_gem->fd, DRM_IOCTL_GEM_CLOSE, &close_ioctl);
++         ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_GEM_CLOSE, &close_ioctl);
+          if (ret != 0)
+          {
+              MOS_DRM_ASSERTMESSAGE("DRM_IOCTL_GEM_CLOSE %d failed (%s): %s",
+@@ -3090,6 +3105,8 @@ mos_bufmgr_gem_destroy_xe(struct mos_bufmgr *bufmgr)
+     struct mos_xe_device *dev = &bufmgr_gem->xe_device;
+     int i, ret;
+ 
++    mos_xe_virtio_fini(bufmgr_gem->fd);
++
+     /* Release userptr bo kept hanging around for optimisation. */
+ 
+     mos_vma_heap_finish(&bufmgr_gem->vma_heap[MEMZONE_SYS]);
+diff --git a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_softlet/linux/common/os/xe/mos_xe_virtio.c
+new file mode 100644
+index 0000000..1ec4229
+--- /dev/null
++++ b/media_softlet/linux/common/os/xe/mos_xe_virtio.c
+@@ -0,0 +1,1203 @@
++/*
++ * Copyright 2025 Google LLC
++ * SPDX-License-Identifier: MIT
++ *
++ * Self-contained vdrm client + Xe ioctl proxy for intel-media-driver.
++ *
++ * This file embeds the entire vdrm protocol and virtgpu transport so
++ * that iHD can run on virtio-gpu without any external shim or
++ * LD_PRELOAD.  All protocol structs are duplicated here to avoid
++ * depending on mesa headers.
++ */
++
++#include <errno.h>
++#include <fcntl.h>
++#include <pthread.h>
++#include <sched.h>
++#include <stdatomic.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/ioctl.h>
++#include <sys/mman.h>
++#include <poll.h>
++#include <unistd.h>
++
++#include "xf86drm.h"
++#include <drm/virtgpu_drm.h>
++
++/* Pull in the Xe DRM uAPI from the media driver's own copy */
++#include "xe_drm.h"
++
++#include "mos_xe_virtio.h"
++
++#define LOG_PREFIX "intel-media-driver-virtio: "
++#define VLOG(fmt, ...) fprintf(stderr, LOG_PREFIX fmt "\n", ##__VA_ARGS__)
++
++#ifndef ARRAY_SIZE
++#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
++#endif
++
++#define ALIGN8(x) (((x) + 7u) & ~7u)
++
++/* =========================================================================
++ * Embedded protocol structs (standalone — no external deps)
++ * ========================================================================= */
++
++#define VIRTGPU_DRM_CAPSET_DRM 6
++#define VIRTGPU_DRM_CONTEXT_XE 6
++
++struct virgl_renderer_capset_drm {
++    uint32_t wire_format_version;
++    uint32_t version_major;
++    uint32_t version_minor;
++    uint32_t version_patchlevel;
++    uint32_t context_type;
++    uint32_t pad;
++    union {
++        struct {
++            uint32_t has_cached_coherent;
++            uint32_t priorities;
++            uint64_t va_start;
++            uint64_t va_size;
++            uint32_t gpu_id;
++            uint32_t gmem_size;
++            uint64_t gmem_base;
++            uint64_t chip_id;
++            uint32_t max_freq;
++            uint32_t highest_bank_bit;
++            uint64_t ubwc_swizzle;
++            uint64_t macrotile_mode;
++            uint32_t has_raytracing;
++            uint32_t has_preemption;
++            uint64_t uche_trap_base;
++        } msm;
++        struct {
++            uint32_t pci_bus;
++            uint32_t pci_dev;
++            uint32_t pci_func;
++            uint32_t pci_revision_id;
++            uint32_t pci_domain;
++            uint32_t pci_device_id;
++        } xe;
++    } u;
++};
++
++/* vdrm base types */
++struct vdrm_shmem {
++    uint32_t seqno;
++    uint32_t rsp_mem_offset;
++};
++
++struct vdrm_ccmd_req {
++    uint32_t cmd;
++    uint32_t len;
++    uint32_t seqno;
++    uint32_t rsp_off;
++};
++
++struct vdrm_ccmd_rsp {
++    uint32_t len;
++};
++
++/* Xe ccmd command IDs */
++enum xe_ccmd {
++    XE_CCMD_NOP                = 0,
++    XE_CCMD_DEVICE_QUERY       = 1,
++    XE_CCMD_GEM_CREATE         = 2,
++    XE_CCMD_VM_CREATE          = 3,
++    XE_CCMD_VM_DESTROY         = 4,
++    XE_CCMD_VM_BIND            = 5,
++    XE_CCMD_EXEC_QUEUE_CREATE  = 6,
++    XE_CCMD_EXEC_QUEUE_DESTROY = 7,
++    XE_CCMD_EXEC               = 8,
++};
++
++#define XE_CCMD_HDR(_cmd, _len) \
++    (struct vdrm_ccmd_req){ .cmd = (_cmd), .len = (_len), }
++
++/* Xe shmem (extends vdrm_shmem) */
++struct xe_shmem {
++    struct vdrm_shmem base;
++    uint64_t banned_exec_queue_mask;
++};
++
++/* XE_CCMD_DEVICE_QUERY */
++struct xe_ccmd_device_query_req {
++    struct vdrm_ccmd_req hdr;
++    uint32_t query;
++    uint32_t size;
++};
++
++struct xe_ccmd_device_query_rsp {
++    struct vdrm_ccmd_rsp hdr;
++    uint32_t pad;
++    int32_t  ret;
++    uint32_t size;
++    uint8_t  payload[];
++};
++
++/* XE_CCMD_GEM_CREATE */
++struct xe_ccmd_gem_create_req {
++    struct vdrm_ccmd_req hdr;
++    uint64_t size;
++    uint32_t placement;
++    uint32_t flags;
++    uint32_t vm_id;
++    uint32_t blob_id;
++    uint16_t cpu_caching;
++    uint16_t pad[3];
++};
++
++/* XE_CCMD_VM_CREATE */
++struct xe_ccmd_vm_create_req {
++    struct vdrm_ccmd_req hdr;
++    uint32_t flags;
++    uint32_t pad;
++};
++
++struct xe_ccmd_vm_create_rsp {
++    struct vdrm_ccmd_rsp hdr;
++    uint32_t pad;
++    int32_t  ret;
++    uint32_t vm_id;
++};
++
++/* XE_CCMD_VM_DESTROY */
++struct xe_ccmd_vm_destroy_req {
++    struct vdrm_ccmd_req hdr;
++    uint32_t vm_id;
++    uint32_t pad;
++};
++
++/* XE_CCMD_VM_BIND */
++struct xe_ccmd_vm_bind_op {
++    uint32_t res_id;
++    uint16_t pat_index;
++    uint16_t pad;
++    uint64_t obj_offset;
++    uint64_t range;
++    uint64_t addr;
++    uint32_t op;
++    uint32_t flags;
++};
++
++struct xe_ccmd_vm_bind_req {
++    struct vdrm_ccmd_req hdr;
++    uint32_t vm_id;
++    uint32_t num_binds;
++    uint8_t  payload[];
++};
++
++struct xe_ccmd_vm_bind_rsp {
++    struct vdrm_ccmd_rsp hdr;
++    int32_t  ret;
++};
++
++/* XE_CCMD_EXEC_QUEUE_CREATE */
++struct xe_ccmd_exec_queue_create_req {
++    struct vdrm_ccmd_req hdr;
++    uint32_t vm_id;
++    uint16_t width;
++    uint16_t num_placements;
++    uint32_t flags;
++    uint32_t pad;
++    uint8_t  payload[];
++};
++
++struct xe_ccmd_exec_queue_create_rsp {
++    struct vdrm_ccmd_rsp hdr;
++    uint32_t pad;
++    int32_t  ret;
++    uint32_t exec_queue_id;
++};
++
++/* XE_CCMD_EXEC_QUEUE_DESTROY */
++struct xe_ccmd_exec_queue_destroy_req {
++    struct vdrm_ccmd_req hdr;
++    uint32_t exec_queue_id;
++    uint32_t pad;
++};
++
++/* XE_CCMD_EXEC */
++struct xe_ccmd_exec_req {
++    struct vdrm_ccmd_req hdr;
++    uint32_t exec_queue_id;
++    uint16_t num_batch_buffer;
++    uint16_t pad;
++    uint64_t address;
++};
++
++struct xe_ccmd_exec_rsp {
++    struct vdrm_ccmd_rsp hdr;
++    int32_t  ret;
++};
++
++/* =========================================================================
++ * Embedded vdrm client (adapted from mesa's vdrm_virtgpu.c)
++ * ========================================================================= */
++
++#define SHMEM_SZ 0x4000
++#define REQBUF_SZ 0x4000
++
++struct vdrm_device {
++    struct virgl_renderer_capset_drm caps;
++
++    struct vdrm_shmem *shmem;
++    uint8_t *rsp_mem;
++    uint32_t rsp_mem_len;
++    uint32_t next_rsp_off;
++    pthread_mutex_t rsp_lock;
++    pthread_mutex_t eb_lock;
++
++    uint32_t next_seqno;
++
++    uint32_t reqbuf_len;
++    uint32_t reqbuf_cnt;
++    uint8_t  reqbuf[REQBUF_SZ];
++
++    /* virtgpu specifics */
++    uint32_t shmem_handle;
++    int fd;
++};
++
++/* Global singleton */
++static struct vdrm_device *g_vdrm = NULL;
++static int g_vdrm_fd = -1;
++
++/* ------- low-level virtgpu helpers ------- */
++
++static int
++virtgpu_ioctl(int fd, unsigned long request, void *arg)
++{
++    return drmIoctl(fd, request, arg);
++}
++
++static void
++virtgpu_gem_close(int fd, uint32_t handle)
++{
++    struct drm_gem_close c = { .handle = handle };
++    drmIoctl(fd, DRM_IOCTL_GEM_CLOSE, &c);
++}
++
++static int
++virtgpu_map_handle(int fd, uint32_t handle, size_t size, void **map)
++{
++    struct drm_virtgpu_map req = { .handle = handle };
++    int ret = drmIoctl(fd, DRM_IOCTL_VIRTGPU_MAP, &req);
++    if (ret) {
++        VLOG("VIRTGPU_MAP failed: %s", strerror(errno));
++        return ret;
++    }
++    *map = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, req.offset);
++    if (*map == MAP_FAILED) {
++        VLOG("mmap failed: %s", strerror(errno));
++        return -1;
++    }
++    return 0;
++}
++
++/* ------- flush / execbuf ------- */
++
++static int
++vdrm_flush_locked(struct vdrm_device *vdev, int *out_fence_fd)
++{
++    if (!vdev->reqbuf_len)
++        return 0;
++
++    uint32_t flags = VIRTGPU_EXECBUF_RING_IDX;
++    if (out_fence_fd)
++        flags |= VIRTGPU_EXECBUF_FENCE_FD_OUT;
++
++    struct drm_virtgpu_execbuffer eb = {
++        .flags         = flags,
++        .size          = vdev->reqbuf_len,
++        .command       = (uintptr_t)vdev->reqbuf,
++        .bo_handles    = 0,
++        .num_bo_handles = 0,
++        .fence_fd      = out_fence_fd ? *out_fence_fd : 0,
++        .ring_idx      = 0,
++    };
++
++    int ret = drmIoctl(vdev->fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &eb);
++    if (ret) {
++        VLOG("EXECBUFFER (flush) failed: %s", strerror(errno));
++        return ret;
++    }
++
++    vdev->reqbuf_len = 0;
++    vdev->reqbuf_cnt = 0;
++
++    if (out_fence_fd)
++        *out_fence_fd = eb.fence_fd;
++
++    return 0;
++}
++
++static int
++vdrm_execbuf_locked(struct vdrm_device *vdev,
++                    void *command, unsigned size,
++                    struct drm_virtgpu_execbuffer_syncobj *in_syncobjs,
++                    uint32_t num_in_syncobjs,
++                    struct drm_virtgpu_execbuffer_syncobj *out_syncobjs,
++                    uint32_t num_out_syncobjs,
++                    bool needs_out_fence_fd,
++                    int *fence_fd)
++{
++    uint32_t flags = VIRTGPU_EXECBUF_RING_IDX;
++    if (needs_out_fence_fd)
++        flags |= VIRTGPU_EXECBUF_FENCE_FD_OUT;
++
++    struct drm_virtgpu_execbuffer eb = {
++        .flags            = flags,
++        .size             = size,
++        .command          = (uintptr_t)command,
++        .bo_handles       = 0,
++        .num_bo_handles   = 0,
++        .fence_fd         = fence_fd ? *fence_fd : -1,
++        .ring_idx         = 0,
++        .syncobj_stride   = sizeof(struct drm_virtgpu_execbuffer_syncobj),
++        .num_in_syncobjs  = num_in_syncobjs,
++        .num_out_syncobjs = num_out_syncobjs,
++        .in_syncobjs      = (uintptr_t)in_syncobjs,
++        .out_syncobjs     = (uintptr_t)out_syncobjs,
++    };
++
++    int ret = drmIoctl(vdev->fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &eb);
++    if (ret) {
++        VLOG("EXECBUFFER failed: %s", strerror(errno));
++        return ret;
++    }
++
++    if (needs_out_fence_fd && fence_fd)
++        *fence_fd = eb.fence_fd;
++
++    return 0;
++}
++
++/* ------- response allocation ------- */
++
++static void *
++vdrm_alloc_rsp(struct vdrm_device *vdev, struct vdrm_ccmd_req *req, uint32_t sz)
++{
++    unsigned off;
++
++    sz = ALIGN8(sz);
++
++    pthread_mutex_lock(&vdev->rsp_lock);
++    if ((vdev->next_rsp_off + sz) >= vdev->rsp_mem_len)
++        vdev->next_rsp_off = 0;
++    off = vdev->next_rsp_off;
++    vdev->next_rsp_off += sz;
++    pthread_mutex_unlock(&vdev->rsp_lock);
++
++    req->rsp_off = off;
++
++    struct vdrm_ccmd_rsp *rsp = (struct vdrm_ccmd_rsp *)&vdev->rsp_mem[off];
++    rsp->len = sz;
++    return rsp;
++}
++
++/* ------- enqueue / send ------- */
++
++static int
++vdrm_enqueue_req(struct vdrm_device *vdev, struct vdrm_ccmd_req *req)
++{
++    req->seqno = ++vdev->next_seqno;
++
++    if ((vdev->reqbuf_len + req->len) > sizeof(vdev->reqbuf)) {
++        int ret = vdrm_flush_locked(vdev, NULL);
++        if (ret)
++            return ret;
++    }
++
++    memcpy(&vdev->reqbuf[vdev->reqbuf_len], req, req->len);
++    vdev->reqbuf_len += req->len;
++    vdev->reqbuf_cnt++;
++    return 0;
++}
++
++static bool
++fence_before(uint32_t a, uint32_t b)
++{
++    return (int32_t)(a - b) < 0;
++}
++
++static void
++vdrm_host_sync(struct vdrm_device *vdev, const struct vdrm_ccmd_req *req)
++{
++    while (fence_before(vdev->shmem->seqno, req->seqno))
++        sched_yield();
++}
++
++static void
++vdrm_wait_fence_fd(int fence_fd)
++{
++    /* Simple poll-based sync_wait */
++    struct pollfd pfd = { .fd = fence_fd, .events = POLLIN };
++    while (poll(&pfd, 1, -1) == -1 && errno == EINTR)
++        ;
++    close(fence_fd);
++}
++
++static int
++vdrm_send_req(struct vdrm_device *vdev, struct vdrm_ccmd_req *req, bool sync)
++{
++    int fence_fd = -1;
++    int ret;
++
++    pthread_mutex_lock(&vdev->eb_lock);
++    ret = vdrm_enqueue_req(vdev, req);
++    if (ret || !sync) {
++        pthread_mutex_unlock(&vdev->eb_lock);
++        return ret;
++    }
++
++    fence_fd = -1;
++    ret = vdrm_flush_locked(vdev, &fence_fd);
++    pthread_mutex_unlock(&vdev->eb_lock);
++
++    if (ret)
++        return ret;
++
++    if (fence_fd >= 0)
++        vdrm_wait_fence_fd(fence_fd);
++
++    vdrm_host_sync(vdev, req);
++    return 0;
++}
++
++/* ------- bo create (RESOURCE_CREATE_BLOB) ------- */
++
++static uint32_t
++vdrm_bo_create(struct vdrm_device *vdev, size_t size, uint32_t blob_flags,
++               uint64_t blob_id, struct vdrm_ccmd_req *req)
++{
++    pthread_mutex_lock(&vdev->eb_lock);
++
++    /* flush buffered cmds first */
++    vdrm_flush_locked(vdev, NULL);
++
++    req->seqno = ++vdev->next_seqno;
++
++    struct drm_virtgpu_resource_create_blob args = {
++        .blob_mem   = VIRTGPU_BLOB_MEM_HOST3D,
++        .blob_flags = blob_flags,
++        .size       = size,
++        .cmd_size   = req->len,
++        .cmd        = (uintptr_t)req,
++        .blob_id    = blob_id,
++    };
++
++    int ret = drmIoctl(vdev->fd, DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB, &args);
++
++    pthread_mutex_unlock(&vdev->eb_lock);
++
++    if (ret) {
++        VLOG("RESOURCE_CREATE_BLOB failed: %s", strerror(errno));
++        return 0;
++    }
++    return args.bo_handle;
++}
++
++/* ------- bo close ------- */
++
++static void
++vdrm_bo_close(struct vdrm_device *vdev, uint32_t handle)
++{
++    /* Flush buffered commands first */
++    if (vdev->reqbuf_len) {
++        pthread_mutex_lock(&vdev->eb_lock);
++        vdrm_flush_locked(vdev, NULL);
++        pthread_mutex_unlock(&vdev->eb_lock);
++    }
++    virtgpu_gem_close(vdev->fd, handle);
++}
++
++/* ------- handle_to_res_id ------- */
++
++static uint32_t
++vdrm_handle_to_res_id(struct vdrm_device *vdev, uint32_t handle)
++{
++    struct drm_virtgpu_resource_info info = { .bo_handle = handle };
++    int ret = drmIoctl(vdev->fd, DRM_IOCTL_VIRTGPU_RESOURCE_INFO, &info);
++    if (ret) {
++        VLOG("RESOURCE_INFO failed: %s", strerror(errno));
++        return 0;
++    }
++    return info.res_handle;
++}
++
++/* ------- connect / disconnect ------- */
++
++static int
++vdrm_get_capset(int fd, struct virgl_renderer_capset_drm *caps)
++{
++    struct drm_virtgpu_get_caps args = {
++        .cap_set_id  = VIRTGPU_DRM_CAPSET_DRM,
++        .cap_set_ver = 0,
++        .addr        = (uintptr_t)caps,
++        .size        = sizeof(*caps),
++    };
++    memset(caps, 0, sizeof(*caps));
++    return drmIoctl(fd, DRM_IOCTL_VIRTGPU_GET_CAPS, &args);
++}
++
++static int
++vdrm_set_context(int fd)
++{
++    struct drm_virtgpu_context_set_param params[] = {
++        { VIRTGPU_CONTEXT_PARAM_CAPSET_ID, VIRTGPU_DRM_CAPSET_DRM },
++        { VIRTGPU_CONTEXT_PARAM_NUM_RINGS, 64 },
++    };
++    struct drm_virtgpu_context_init args = {
++        .num_params     = ARRAY_SIZE(params),
++        .ctx_set_params = (uintptr_t)params,
++    };
++    return drmIoctl(fd, DRM_IOCTL_VIRTGPU_CONTEXT_INIT, &args);
++}
++
++static int
++vdrm_init_shmem(struct vdrm_device *vdev)
++{
++    struct drm_virtgpu_resource_create_blob args = {
++        .blob_mem   = VIRTGPU_BLOB_MEM_HOST3D,
++        .blob_flags = VIRTGPU_BLOB_FLAG_USE_MAPPABLE,
++        .size       = SHMEM_SZ,
++        .blob_id    = 0,
++    };
++
++    int ret = drmIoctl(vdev->fd, DRM_IOCTL_VIRTGPU_RESOURCE_CREATE_BLOB, &args);
++    if (ret) {
++        VLOG("shmem RESOURCE_CREATE_BLOB failed: %s", strerror(errno));
++        return ret;
++    }
++
++    vdev->shmem_handle = args.bo_handle;
++
++    void *map = NULL;
++    ret = virtgpu_map_handle(vdev->fd, vdev->shmem_handle, args.size, &map);
++    if (ret) {
++        virtgpu_gem_close(vdev->fd, vdev->shmem_handle);
++        vdev->shmem_handle = 0;
++        return ret;
++    }
++
++    vdev->shmem = (struct vdrm_shmem *)map;
++    uint32_t offset = vdev->shmem->rsp_mem_offset;
++    vdev->rsp_mem_len = (uint32_t)args.size - offset;
++    vdev->rsp_mem = &((uint8_t *)map)[offset];
++
++    return 0;
++}
++
++static struct vdrm_device *
++vdrm_connect(int fd)
++{
++    struct virgl_renderer_capset_drm caps;
++
++    int ret = vdrm_get_capset(fd, &caps);
++    if (ret) {
++        VLOG("GET_CAPS failed: %s", strerror(errno));
++        return NULL;
++    }
++
++    if (caps.context_type != VIRTGPU_DRM_CONTEXT_XE) {
++        /* Not an Xe virtio context — silent return */
++        return NULL;
++    }
++
++    ret = vdrm_set_context(fd);
++    if (ret) {
++        VLOG("CONTEXT_INIT failed: %s", strerror(errno));
++        return NULL;
++    }
++
++    struct vdrm_device *vdev = (struct vdrm_device *)calloc(1, sizeof(*vdev));
++    if (!vdev)
++        return NULL;
++
++    vdev->fd = fd;
++    vdev->caps = caps;
++
++    ret = vdrm_init_shmem(vdev);
++    if (ret) {
++        free(vdev);
++        return NULL;
++    }
++
++    pthread_mutex_init(&vdev->rsp_lock, NULL);
++    pthread_mutex_init(&vdev->eb_lock, NULL);
++
++    return vdev;
++}
++
++static void
++vdrm_disconnect(struct vdrm_device *vdev)
++{
++    if (!vdev)
++        return;
++
++    /* Flush remaining */
++    pthread_mutex_lock(&vdev->eb_lock);
++    vdrm_flush_locked(vdev, NULL);
++    pthread_mutex_unlock(&vdev->eb_lock);
++
++    if (vdev->shmem) {
++        munmap(vdev->shmem, SHMEM_SZ);
++        vdev->shmem = NULL;
++    }
++    if (vdev->shmem_handle) {
++        virtgpu_gem_close(vdev->fd, vdev->shmem_handle);
++        vdev->shmem_handle = 0;
++    }
++
++    pthread_mutex_destroy(&vdev->rsp_lock);
++    pthread_mutex_destroy(&vdev->eb_lock);
++
++    free(vdev);
++}
++
++/* =========================================================================
++ * Ioctl handlers — each translates drmIoctl to ccmd
++ * ========================================================================= */
++
++/* ------- DEVICE_QUERY ------- */
++
++static int
++handle_device_query(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_xe_device_query *q = (struct drm_xe_device_query *)arg;
++
++    struct xe_ccmd_device_query_req req = {
++        .hdr   = XE_CCMD_HDR(XE_CCMD_DEVICE_QUERY, sizeof(req)),
++        .query = q->query,
++        .size  = q->size,
++    };
++
++    uint32_t rsp_sz = (uint32_t)sizeof(struct xe_ccmd_device_query_rsp);
++    if (q->size > 0)
++        rsp_sz += ALIGN8(q->size);
++
++    struct xe_ccmd_device_query_rsp *rsp =
++        (struct xe_ccmd_device_query_rsp *)vdrm_alloc_rsp(vdev, &req.hdr, rsp_sz);
++
++    int ret = vdrm_send_req(vdev, &req.hdr, true);
++    if (ret)
++        return ret;
++
++    if (rsp->ret) {
++        errno = (int)(-rsp->ret);
++        return -1;
++    }
++
++    q->size = rsp->size;
++
++    if (q->data && rsp->size > 0)
++        memcpy((void *)(uintptr_t)q->data, rsp->payload, rsp->size);
++
++    return 0;
++}
++
++/* ------- GEM_CREATE ------- */
++
++static int
++handle_gem_create(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_xe_gem_create *gc = (struct drm_xe_gem_create *)arg;
++
++    struct xe_ccmd_gem_create_req req = {
++        .hdr        = XE_CCMD_HDR(XE_CCMD_GEM_CREATE, sizeof(req)),
++        .size       = gc->size,
++        .placement  = gc->placement,
++        .flags      = gc->flags,
++        .vm_id      = gc->vm_id,
++        .cpu_caching = gc->cpu_caching,
++    };
++
++    uint32_t blob_flags =
++        VIRTGPU_BLOB_FLAG_USE_MAPPABLE |
++        VIRTGPU_BLOB_FLAG_USE_SHAREABLE |
++        VIRTGPU_BLOB_FLAG_USE_CROSS_DEVICE;
++
++    uint32_t handle = vdrm_bo_create(vdev, gc->size, blob_flags, 0, &req.hdr);
++    if (!handle) {
++        errno = ENOMEM;
++        return -1;
++    }
++
++    gc->handle = handle;
++    return 0;
++}
++
++/* ------- GEM_MMAP_OFFSET (translate to VIRTGPU_MAP) ------- */
++
++static int
++handle_gem_mmap_offset(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_xe_gem_mmap_offset *mmo = (struct drm_xe_gem_mmap_offset *)arg;
++
++    struct drm_virtgpu_map vmap = { .handle = mmo->handle };
++    int ret = drmIoctl(vdev->fd, DRM_IOCTL_VIRTGPU_MAP, &vmap);
++    if (ret)
++        return ret;
++
++    mmo->offset = vmap.offset;
++    return 0;
++}
++
++/* ------- VM_CREATE ------- */
++
++static int
++handle_vm_create(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_xe_vm_create *vc = (struct drm_xe_vm_create *)arg;
++
++    struct xe_ccmd_vm_create_req req = {
++        .hdr   = XE_CCMD_HDR(XE_CCMD_VM_CREATE, sizeof(req)),
++        .flags = vc->flags,
++    };
++
++    struct xe_ccmd_vm_create_rsp *rsp =
++        (struct xe_ccmd_vm_create_rsp *)vdrm_alloc_rsp(vdev, &req.hdr, sizeof(*rsp));
++
++    int ret = vdrm_send_req(vdev, &req.hdr, true);
++    if (ret)
++        return ret;
++
++    if (rsp->ret) {
++        errno = (int)(-rsp->ret);
++        return -1;
++    }
++
++    vc->vm_id = rsp->vm_id;
++    return 0;
++}
++
++/* ------- VM_DESTROY ------- */
++
++static int
++handle_vm_destroy(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_xe_vm_destroy *vd = (struct drm_xe_vm_destroy *)arg;
++
++    struct xe_ccmd_vm_destroy_req req = {
++        .hdr   = XE_CCMD_HDR(XE_CCMD_VM_DESTROY, sizeof(req)),
++        .vm_id = vd->vm_id,
++    };
++    return vdrm_send_req(vdev, &req.hdr, false);
++}
++
++/* ------- VM_BIND ------- */
++
++static int
++handle_vm_bind(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_xe_vm_bind *vb = (struct drm_xe_vm_bind *)arg;
++
++    uint32_t num_binds = vb->num_binds;
++    if (num_binds == 0)
++        num_binds = 1;
++
++    size_t payload_sz = num_binds * sizeof(struct xe_ccmd_vm_bind_op);
++    size_t req_sz = sizeof(struct xe_ccmd_vm_bind_req) + payload_sz;
++
++    struct xe_ccmd_vm_bind_req *req =
++        (struct xe_ccmd_vm_bind_req *)calloc(1, req_sz);
++    if (!req) {
++        errno = ENOMEM;
++        return -1;
++    }
++
++    req->hdr       = XE_CCMD_HDR(XE_CCMD_VM_BIND, (uint32_t)req_sz);
++    req->vm_id     = vb->vm_id;
++    req->num_binds = num_binds;
++
++    struct xe_ccmd_vm_bind_op *ops =
++        (struct xe_ccmd_vm_bind_op *)req->payload;
++
++    if (vb->num_binds <= 1) {
++        uint32_t handle = vb->bind.obj;
++        uint32_t res_id = 0;
++        if (handle)
++            res_id = vdrm_handle_to_res_id(vdev, handle);
++
++        ops[0].res_id     = res_id;
++        ops[0].pat_index  = vb->bind.pat_index;
++        ops[0].obj_offset = vb->bind.obj_offset;
++        ops[0].range      = vb->bind.range;
++        ops[0].addr       = vb->bind.addr;
++        ops[0].op         = vb->bind.op;
++        ops[0].flags      = vb->bind.flags;
++    } else {
++        struct drm_xe_vm_bind_op *src =
++            (struct drm_xe_vm_bind_op *)(uintptr_t)vb->vector_of_binds;
++        for (uint32_t i = 0; i < num_binds; i++) {
++            uint32_t handle = src[i].obj;
++            uint32_t res_id = 0;
++            if (handle)
++                res_id = vdrm_handle_to_res_id(vdev, handle);
++
++            ops[i].res_id     = res_id;
++            ops[i].pat_index  = src[i].pat_index;
++            ops[i].obj_offset = src[i].obj_offset;
++            ops[i].range      = src[i].range;
++            ops[i].addr       = src[i].addr;
++            ops[i].op         = src[i].op;
++            ops[i].flags      = src[i].flags;
++        }
++    }
++
++    struct xe_ccmd_vm_bind_rsp *rsp =
++        (struct xe_ccmd_vm_bind_rsp *)vdrm_alloc_rsp(vdev, &req->hdr, sizeof(*rsp));
++
++    int ret = vdrm_send_req(vdev, &req->hdr, true);
++    int err = ret ? ret : (rsp->ret ? -1 : 0);
++    if (!ret && rsp->ret)
++        errno = (int)(-rsp->ret);
++
++    free(req);
++
++    if (err)
++        return err;
++
++    /* The ccmd bind is synchronous. Signal any out-syncobjs the caller
++     * attached (iHD creates a temporary syncobj and waits on it). */
++    if (vb->num_syncs > 0 && vb->syncs) {
++        struct drm_xe_sync *syncs =
++            (struct drm_xe_sync *)(uintptr_t)vb->syncs;
++        for (uint32_t i = 0; i < vb->num_syncs; i++) {
++            if (syncs[i].flags & DRM_XE_SYNC_FLAG_SIGNAL) {
++                struct drm_syncobj_array sig = {
++                    .handles       = (uintptr_t)&syncs[i].handle,
++                    .count_handles = 1,
++                };
++                drmIoctl(vdev->fd, DRM_IOCTL_SYNCOBJ_SIGNAL, &sig);
++            }
++        }
++    }
++
++    return 0;
++}
++
++/* ------- EXEC_QUEUE_CREATE ------- */
++
++static int
++handle_exec_queue_create(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_xe_exec_queue_create *ec =
++        (struct drm_xe_exec_queue_create *)arg;
++
++    uint32_t n_instances = (uint32_t)ec->width * ec->num_placements;
++    size_t instances_sz = n_instances *
++                          sizeof(struct drm_xe_engine_class_instance);
++    size_t req_sz = sizeof(struct xe_ccmd_exec_queue_create_req) + instances_sz;
++
++    struct xe_ccmd_exec_queue_create_req *req =
++        (struct xe_ccmd_exec_queue_create_req *)calloc(1, req_sz);
++    if (!req) {
++        errno = ENOMEM;
++        return -1;
++    }
++
++    req->hdr            = XE_CCMD_HDR(XE_CCMD_EXEC_QUEUE_CREATE, (uint32_t)req_sz);
++    req->vm_id          = ec->vm_id;
++    req->width          = ec->width;
++    req->num_placements = ec->num_placements;
++    req->flags          = ec->flags;
++
++    memcpy(req->payload, (void *)(uintptr_t)ec->instances, instances_sz);
++
++    struct xe_ccmd_exec_queue_create_rsp *rsp =
++        (struct xe_ccmd_exec_queue_create_rsp *)vdrm_alloc_rsp(vdev, &req->hdr, sizeof(*rsp));
++
++    int ret = vdrm_send_req(vdev, &req->hdr, true);
++    free(req);
++
++    if (ret)
++        return ret;
++    if (rsp->ret) {
++        errno = (int)(-rsp->ret);
++        return -1;
++    }
++
++    ec->exec_queue_id = rsp->exec_queue_id;
++    return 0;
++}
++
++/* ------- EXEC_QUEUE_DESTROY ------- */
++
++static int
++handle_exec_queue_destroy(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_xe_exec_queue_destroy *ed =
++        (struct drm_xe_exec_queue_destroy *)arg;
++
++    struct xe_ccmd_exec_queue_destroy_req req = {
++        .hdr           = XE_CCMD_HDR(XE_CCMD_EXEC_QUEUE_DESTROY, sizeof(req)),
++        .exec_queue_id = ed->exec_queue_id,
++    };
++    return vdrm_send_req(vdev, &req.hdr, false);
++}
++
++/* ------- EXEC ------- */
++
++static int
++handle_exec(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_xe_exec *xe = (struct drm_xe_exec *)arg;
++
++    struct xe_ccmd_exec_req req = {
++        .hdr              = XE_CCMD_HDR(XE_CCMD_EXEC, sizeof(req)),
++        .exec_queue_id    = xe->exec_queue_id,
++        .num_batch_buffer = xe->num_batch_buffer,
++        .address          = xe->address,
++    };
++
++    /* Convert drm_xe_sync arrays to virtgpu syncobj arrays.
++     * Forward ALL syncobjs including timeline with their points. */
++    struct drm_xe_sync *xe_syncs =
++        (struct drm_xe_sync *)(uintptr_t)xe->syncs;
++    uint32_t n_in = 0;
++    uint32_t n_out = 0;
++    bool has_out = false;
++
++    for (uint32_t i = 0; i < xe->num_syncs; i++) {
++        if (xe_syncs[i].flags & DRM_XE_SYNC_FLAG_SIGNAL) {
++            has_out = true;
++            n_out++;
++        } else {
++            n_in++;
++        }
++    }
++
++    struct drm_virtgpu_execbuffer_syncobj *in_so = NULL;
++    struct drm_virtgpu_execbuffer_syncobj *out_so = NULL;
++
++    if (n_in) {
++        in_so = (struct drm_virtgpu_execbuffer_syncobj *)
++            calloc(n_in, sizeof(*in_so));
++        if (!in_so) {
++            errno = ENOMEM;
++            return -1;
++        }
++    }
++
++    if (n_out) {
++        out_so = (struct drm_virtgpu_execbuffer_syncobj *)
++            calloc(n_out, sizeof(*out_so));
++        if (!out_so) {
++            free(in_so);
++            errno = ENOMEM;
++            return -1;
++        }
++    }
++
++    uint32_t ii = 0, oi = 0;
++    for (uint32_t i = 0; i < xe->num_syncs; i++) {
++        struct drm_xe_sync *s = &xe_syncs[i];
++        if (s->flags & DRM_XE_SYNC_FLAG_SIGNAL) {
++            out_so[oi].handle = s->handle;
++            out_so[oi].flags  = 0;
++            out_so[oi].point  = s->timeline_value;
++            oi++;
++        } else {
++            in_so[ii].handle = s->handle;
++            in_so[ii].flags  = 0;
++            in_so[ii].point  = s->timeline_value;
++            ii++;
++        }
++    }
++
++    /* Flush buffered requests, then submit exec as its own execbuf */
++    pthread_mutex_lock(&vdev->eb_lock);
++    vdrm_flush_locked(vdev, NULL);
++
++    req.hdr.seqno = ++vdev->next_seqno;
++
++    int fence_fd = -1;
++    int ret = vdrm_execbuf_locked(vdev,
++                                  &req, sizeof(req),
++                                  in_so, n_in,
++                                  out_so, n_out,
++                                  has_out, &fence_fd);
++    pthread_mutex_unlock(&vdev->eb_lock);
++
++    /* If we got an out fence_fd, import it into each out-syncobj */
++    if (!ret && fence_fd >= 0) {
++        for (uint32_t i = 0; i < xe->num_syncs; i++) {
++            struct drm_xe_sync *s = &xe_syncs[i];
++            if (!(s->flags & DRM_XE_SYNC_FLAG_SIGNAL))
++                continue;
++
++            struct drm_syncobj_handle sh;
++            memset(&sh, 0, sizeof(sh));
++            sh.handle = s->handle;
++            sh.flags  = DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE;
++            sh.fd     = fence_fd;
++            drmIoctl(vdev->fd, DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE, &sh);
++        }
++        close(fence_fd);
++    }
++
++    free(in_so);
++    free(out_so);
++    return ret;
++}
++
++/* ------- EXEC_QUEUE_GET_PROPERTY ------- */
++
++static int
++handle_exec_queue_get_property(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_xe_exec_queue_get_property *p =
++        (struct drm_xe_exec_queue_get_property *)arg;
++
++    if (p->property == DRM_XE_EXEC_QUEUE_GET_PROPERTY_BAN) {
++        struct xe_shmem *shmem = (struct xe_shmem *)vdev->shmem;
++        if (shmem && p->exec_queue_id < 64) {
++            p->value = (shmem->banned_exec_queue_mask >>
++                        p->exec_queue_id) & 1;
++            return 0;
++        }
++    }
++    errno = EINVAL;
++    return -1;
++}
++
++/* ------- GEM_CLOSE ------- */
++
++static int
++handle_gem_close(struct vdrm_device *vdev, void *arg)
++{
++    struct drm_gem_close *gc = (struct drm_gem_close *)arg;
++    vdrm_bo_close(vdev, gc->handle);
++    return 0;
++}
++
++/* =========================================================================
++ * Public API
++ * ========================================================================= */
++
++bool
++mos_xe_virtio_probe(int fd)
++{
++    struct virgl_renderer_capset_drm caps;
++    int ret = vdrm_get_capset(fd, &caps);
++    if (ret)
++        return false;
++    return (caps.context_type == VIRTGPU_DRM_CONTEXT_XE);
++}
++
++int
++mos_xe_virtio_init(int fd)
++{
++    if (g_vdrm && g_vdrm_fd == fd)
++        return 0;
++
++    struct vdrm_device *vdev = vdrm_connect(fd);
++    if (!vdev)
++        return -1;
++
++    g_vdrm = vdev;
++    g_vdrm_fd = fd;
++    return 0;
++}
++
++void
++mos_xe_virtio_fini(int fd)
++{
++    if (g_vdrm && g_vdrm_fd == fd) {
++        vdrm_disconnect(g_vdrm);
++        g_vdrm = NULL;
++        g_vdrm_fd = -1;
++    }
++}
++
++bool
++mos_xe_virtio_is_active(int fd)
++{
++    return (g_vdrm != NULL && g_vdrm_fd == fd);
++}
++
++void *
++mos_xe_gem_mmap(int fd, uint32_t handle, size_t size)
++{
++    if (!g_vdrm || g_vdrm_fd != fd)
++        return NULL;
++
++    struct drm_virtgpu_map vmap = { .handle = handle };
++    int ret = drmIoctl(fd, DRM_IOCTL_VIRTGPU_MAP, &vmap);
++    if (ret) {
++        VLOG("VIRTGPU_MAP for mmap failed: %s", strerror(errno));
++        return NULL;
++    }
++
++    void *map = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED,
++                     fd, vmap.offset);
++    if (map == MAP_FAILED) {
++        VLOG("mmap failed: %s", strerror(errno));
++        return NULL;
++    }
++    return map;
++}
++
++int
++mos_xe_ioctl(int fd, unsigned long request, void *arg)
++{
++    /* Lazy-init on first Xe ioctl if we're on virtio */
++    if (!g_vdrm) {
++        /* Check if this fd is a virtio_gpu device */
++        drm_version_t version;
++        char name[16] = "";
++        memset(&version, 0, sizeof(version));
++        version.name_len = sizeof(name) - 1;
++        version.name = name;
++        if (drmIoctl(fd, DRM_IOCTL_VERSION, &version) == 0 &&
++            strcmp("virtio_gpu", name) == 0) {
++            if (mos_xe_virtio_init(fd) != 0) {
++                /* Fall through to native drmIoctl */
++                return drmIoctl(fd, request, arg);
++            }
++        } else {
++            /* Not virtio — pass through */
++            return drmIoctl(fd, request, arg);
++        }
++    }
++
++    if (g_vdrm_fd != fd) {
++        /* Different fd — pass through */
++        return drmIoctl(fd, request, arg);
++    }
++
++    /* Dispatch Xe ioctls to handlers */
++    switch (request) {
++    case DRM_IOCTL_XE_DEVICE_QUERY:
++        return handle_device_query(g_vdrm, arg);
++    case DRM_IOCTL_XE_GEM_CREATE:
++        return handle_gem_create(g_vdrm, arg);
++    case DRM_IOCTL_XE_GEM_MMAP_OFFSET:
++        return handle_gem_mmap_offset(g_vdrm, arg);
++    case DRM_IOCTL_XE_VM_CREATE:
++        return handle_vm_create(g_vdrm, arg);
++    case DRM_IOCTL_XE_VM_DESTROY:
++        return handle_vm_destroy(g_vdrm, arg);
++    case DRM_IOCTL_XE_VM_BIND:
++        return handle_vm_bind(g_vdrm, arg);
++    case DRM_IOCTL_XE_EXEC_QUEUE_CREATE:
++        return handle_exec_queue_create(g_vdrm, arg);
++    case DRM_IOCTL_XE_EXEC_QUEUE_DESTROY:
++        return handle_exec_queue_destroy(g_vdrm, arg);
++    case DRM_IOCTL_XE_EXEC_QUEUE_GET_PROPERTY:
++        return handle_exec_queue_get_property(g_vdrm, arg);
++    case DRM_IOCTL_XE_EXEC:
++        return handle_exec(g_vdrm, arg);
++    case DRM_IOCTL_GEM_CLOSE:
++        return handle_gem_close(g_vdrm, arg);
++    default:
++        /* SYNCOBJ_*, PRIME_*, etc. — pass through to kernel */
++        return drmIoctl(fd, request, arg);
++    }
++}
+diff --git a/media_softlet/linux/common/os/xe/mos_xe_virtio.h b/media_softlet/linux/common/os/xe/mos_xe_virtio.h
+new file mode 100644
+index 0000000..2db1655
+--- /dev/null
++++ b/media_softlet/linux/common/os/xe/mos_xe_virtio.h
+@@ -0,0 +1,30 @@
++/*
++ * Copyright 2025 Google LLC
++ * SPDX-License-Identifier: MIT
++ *
++ * Virtio-GPU transport for Xe ioctls in intel-media-driver (iHD).
++ * Embeds a vdrm client so iHD works on virtio-gpu without any shim.
++ */
++
++#ifndef MOS_XE_VIRTIO_H
++#define MOS_XE_VIRTIO_H
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++bool mos_xe_virtio_probe(int fd);
++int  mos_xe_virtio_init(int fd);
++void mos_xe_virtio_fini(int fd);
++bool mos_xe_virtio_is_active(int fd);
++int  mos_xe_ioctl(int fd, unsigned long request, void *arg);
++void *mos_xe_gem_mmap(int fd, uint32_t handle, size_t size);
++
++#ifdef __cplusplus
++}
++#endif
++#endif /* MOS_XE_VIRTIO_H */
