@@ -2365,7 +2365,7 @@ index 3eb33e9..61963ff 100644
  int
 diff --git a/src/drm/xe/xe_ccmd.c b/src/drm/xe/xe_ccmd.c
 new file mode 100644
-index 0000000..884af18
+index 0000000..ba14c3d
 --- /dev/null
 +++ b/src/drm/xe/xe_ccmd.c
 @@ -0,0 +1,414 @@
@@ -2429,7 +2429,7 @@ index 0000000..884af18
 +      .size = req->size,
 +      .placement = req->placement,
 +      .flags = req->flags,
-+      .vm_id = req->vm_id,
++      .vm_id = 0,  /* Always shareable — guest VM binding is via VM_BIND ccmd */
 +      .cpu_caching = req->cpu_caching,
 +   };
 +
