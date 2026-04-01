@@ -381,10 +381,10 @@ index 026d7b0..e709431 100644
  
 diff --git a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_softlet/linux/common/os/xe/mos_xe_virtio.c
 new file mode 100644
-index 0000000..33eb570
+index 0000000..2691b24
 --- /dev/null
 +++ b/media_softlet/linux/common/os/xe/mos_xe_virtio.c
-@@ -0,0 +1,1193 @@
+@@ -0,0 +1,1218 @@
 +/*
 + * Copyright 2025 Intel Corporation
 + * SPDX-License-Identifier: MIT
@@ -625,7 +625,7 @@ index 0000000..33eb570
 +#define VDRM_REQBUF_SZ 0x4000
 +
 +struct vdrm_device {
-+    int fd;
++    int fd;         /* vdrm protocol fd (may be reopened) */
 +
 +    struct vdrm_shmem *shmem;
 +    uint8_t           *rsp_mem;
@@ -763,7 +763,7 @@ index 0000000..33eb570
 +{
 +    struct virgl_renderer_capset_drm caps;
 +    int ret;
-+
++    int own_fd = -1;
 +    ret = vdrm_get_capset(fd, &caps);
 +    if (ret)
 +        return NULL;
@@ -772,14 +772,28 @@ index 0000000..33eb570
 +        return NULL;
 +
 +    ret = vdrm_set_context(fd);
++    if (ret && errno == EEXIST) {
++        /* The fd already has a virtio context (e.g. from mesa/zink).
++         * Open a fresh fd so we get our own context.
++         */
++        char path[64];
++        snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
++        own_fd = open(path, O_RDWR | O_CLOEXEC);
++        if (own_fd < 0)
++            return NULL;
++        fd = own_fd;
++        ret = vdrm_set_context(fd);
++    }
 +    if (ret) {
-+        MOS_DRM_ASSERTMESSAGE("vdrm set_context failed: %s", strerror(errno));
++        if (own_fd >= 0) close(own_fd);
 +        return NULL;
 +    }
 +
 +    struct vdrm_device *vdev = (struct vdrm_device *)calloc(1, sizeof(*vdev));
-+    if (!vdev)
++    if (!vdev) {
++        if (own_fd >= 0) close(own_fd);
 +        return NULL;
++    }
 +
 +    vdev->fd = fd;
 +    pthread_mutex_init(&vdev->rsp_lock, NULL);
@@ -787,6 +801,7 @@ index 0000000..33eb570
 +
 +    ret = vdrm_init_shmem(vdev);
 +    if (ret) {
++        if (own_fd >= 0) close(own_fd);
 +        free(vdev);
 +        return NULL;
 +    }
@@ -1274,7 +1289,7 @@ index 0000000..33eb570
 +                memset(&sig, 0, sizeof(sig));
 +                sig.handles       = (uintptr_t)&syncs[i].handle;
 +                sig.count_handles = 1;
-+                drmIoctl(vdev->fd, DRM_IOCTL_SYNCOBJ_SIGNAL, &sig);
++                drmIoctl(g_vdrm_fd, DRM_IOCTL_SYNCOBJ_SIGNAL, &sig);
 +            }
 +        }
 +    }
@@ -1395,7 +1410,7 @@ index 0000000..33eb570
 +            sh.handle = s->handle;
 +            sh.flags  = DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE;
 +            sh.fd     = fence_fd;
-+            drmIoctl(vdev->fd, DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE, &sh);
++            drmIoctl(g_vdrm_fd, DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE, &sh);
 +        }
 +        close(fence_fd);
 +    }
@@ -1547,8 +1562,13 @@ index 0000000..33eb570
 +    case DRM_IOCTL_GEM_CLOSE:
 +        return handle_gem_close(vdev, (struct drm_gem_close *)arg);
 +
++    case DRM_IOCTL_PRIME_HANDLE_TO_FD:
++    case DRM_IOCTL_PRIME_FD_TO_HANDLE:
++        /* GEM handles live on vdev->fd (may differ from caller fd). */
++        return drmIoctl(vdev->fd, request, arg);
++
 +    default:
-+        /* SYNCOBJ_*, PRIME_*, etc. -- pass through to kernel */
++        /* SYNCOBJ_* etc. -- pass through on caller's fd. */
 +        return drmIoctl(fd, request, arg);
 +    }
 +}
@@ -1559,11 +1579,16 @@ index 0000000..33eb570
 +    if (!g_vdrm || g_vdrm_fd != fd)
 +        return MAP_FAILED;
 +
++    /* Use vdrm's fd for MAP and mmap — GEM handles live on that fd,
++     * which may differ from the caller's fd if we reopened it.
++     */
++    int vfd = g_vdrm->fd;
++
 +    struct drm_virtgpu_map req;
 +    memset(&req, 0, sizeof(req));
 +    req.handle = handle;
 +
-+    int ret = drmIoctl(fd, DRM_IOCTL_VIRTGPU_MAP, &req);
++    int ret = drmIoctl(vfd, DRM_IOCTL_VIRTGPU_MAP, &req);
 +    if (ret) {
 +        MOS_DRM_ASSERTMESSAGE("mos_xe_gem_mmap: VIRTGPU_MAP failed: %s",
 +                              strerror(errno));
@@ -1571,7 +1596,7 @@ index 0000000..33eb570
 +    }
 +
 +    void *map = mmap(NULL, size, PROT_READ | PROT_WRITE,
-+                     MAP_SHARED, fd, req.offset);
++                     MAP_SHARED, vfd, req.offset);
 +    if (map == MAP_FAILED) {
 +        MOS_DRM_ASSERTMESSAGE("mos_xe_gem_mmap: mmap failed: %s",
 +                              strerror(errno));
