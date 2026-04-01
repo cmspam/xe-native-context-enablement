@@ -1,0 +1,876 @@
+diff --git a/src/gallium/winsys/iris/drm/iris_drm_winsys.c b/src/gallium/winsys/iris/drm/iris_drm_winsys.c
+index 54e9971..517d852 100644
+--- a/src/gallium/winsys/iris/drm/iris_drm_winsys.c
++++ b/src/gallium/winsys/iris/drm/iris_drm_winsys.c
+@@ -48,16 +48,22 @@ bool
+ iris_drm_probe_nctx(int fd, const struct virgl_renderer_capset_drm *caps)
+ {
+ #ifdef HAVE_INTEL_VIRTIO
+-   if (caps->context_type != VIRTGPU_DRM_CONTEXT_I915)
++   if (caps->context_type != VIRTGPU_DRM_CONTEXT_I915 &&
++       caps->context_type != VIRTGPU_DRM_CONTEXT_XE)
+       return false;
+ 
+    if (debug_get_bool_option("INTEL_VIRTIO_DISABLE", false))
+       return false;
+ 
+    struct intel_device_info devinfo;
++   uint32_t pci_device_id;
+ 
+-   if (!intel_get_device_info_from_pci_id(caps->u.intel.pci_device_id,
+-                                          &devinfo))
++   if (caps->context_type == VIRTGPU_DRM_CONTEXT_XE)
++      pci_device_id = caps->u.xe.pci_device_id;
++   else
++      pci_device_id = caps->u.intel.pci_device_id;
++
++   if (!intel_get_device_info_from_pci_id(pci_device_id, &devinfo))
+       return false;
+ 
+    if (devinfo.ver < 8 || devinfo.platform == INTEL_PLATFORM_CHV)
+diff --git a/src/intel/dev/intel_kmd.c b/src/intel/dev/intel_kmd.c
+index 84cd676..60e0295 100644
+--- a/src/intel/dev/intel_kmd.c
++++ b/src/intel/dev/intel_kmd.c
+@@ -38,13 +38,19 @@ intel_get_kmd_type(int fd)
+       return type;
+ 
+    /*
+-    * For virtio, version->name would be either "virtio_gpu" or "i915",
++    * For virtio, version->name would be either "virtio_gpu" or "i915"/"xe",
+     * depending on whether vtest is used or not.
+     */
+-   if (strcmp(version->name, "i915") == 0 || is_intel_virtio_fd(fd))
++   if (strcmp(version->name, "i915") == 0)
+       type = INTEL_KMD_TYPE_I915;
+    else if (strcmp(version->name, "xe") == 0)
+       type = INTEL_KMD_TYPE_XE;
++   else if (is_intel_virtio_fd(fd)) {
++      if (is_intel_virtio_xe(fd))
++         type = INTEL_KMD_TYPE_XE;
++      else
++         type = INTEL_KMD_TYPE_I915;
++   }
+ 
+    drmFreeVersion(version);
+ 
+diff --git a/src/intel/dev/meson.build b/src/intel/dev/meson.build
+index 5085af1..beaa44d 100644
+--- a/src/intel/dev/meson.build
++++ b/src/intel/dev/meson.build
+@@ -27,6 +27,7 @@ files_libintel_dev += files(
+   'virtio/intel_virtio_device.c',
+   'virtio/i915_virtio_ccmd.c',
+   'virtio/i915_virtio_ccmd_execbuf.c',
++  'virtio/xe_virtio_ccmd.c',
+ )
+ 
+ inc_intel_dev_virtio += [
+diff --git a/src/intel/dev/virtio/i915_virtio_ccmd.c b/src/intel/dev/virtio/i915_virtio_ccmd.c
+index bfc8cc5..b14fe25 100644
+--- a/src/intel/dev/virtio/i915_virtio_ccmd.c
++++ b/src/intel/dev/virtio/i915_virtio_ccmd.c
+@@ -705,6 +705,72 @@ intel_virtio_ioctl(int fd, unsigned long cmd, void *req)
+ 
+    int orig_errno = errno;
+ 
++#define IOC_MASKED_XE(IOC) ((IOC) & ~IOCSIZE_MASK)
++
++   if (dev->is_xe) {
++      switch (IOC_MASKED_XE(cmd)) {
++      /* Syncobj and prime ioctls fall through to the common handlers below */
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_WAIT):
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_CREATE):
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_DESTROY):
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_RESET):
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_SIGNAL):
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL):
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT):
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_TRANSFER):
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_QUERY):
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE):
++      case IOC_MASKED_XE(DRM_IOCTL_SYNCOBJ_HANDLE_TO_FD):
++      case IOC_MASKED_XE(DRM_IOCTL_PRIME_HANDLE_TO_FD):
++      case IOC_MASKED_XE(DRM_IOCTL_PRIME_FD_TO_HANDLE):
++         break; /* fall through to common IOC_MASKED switch */
++      case IOC_MASKED_XE(DRM_IOCTL_XE_DEVICE_QUERY):
++         errno = xe_virtio_device_query(dev, req);
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_XE_GEM_CREATE):
++         errno = xe_virtio_gem_create(dev, req);
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_GEM_CLOSE):
++         errno = xe_virtio_gem_close(dev, req);
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_XE_VM_CREATE):
++         errno = xe_virtio_vm_create(dev, req);
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_XE_VM_DESTROY):
++         errno = xe_virtio_vm_destroy(dev, req);
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_XE_VM_BIND):
++         errno = xe_virtio_vm_bind(dev, req);
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_XE_EXEC_QUEUE_CREATE):
++         errno = xe_virtio_exec_queue_create(dev, req);
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_XE_EXEC_QUEUE_DESTROY):
++         errno = xe_virtio_exec_queue_destroy(dev, req);
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_XE_EXEC_QUEUE_GET_PROPERTY):
++         errno = xe_virtio_exec_queue_get_property(dev, req);
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_XE_EXEC):
++         errno = xe_virtio_exec(dev, req);
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_XE_WAIT_USER_FENCE):
++         /* Wait user fence is not needed in virtio model */
++         errno = 0;
++         goto out;
++      case IOC_MASKED_XE(DRM_IOCTL_XE_GEM_MMAP_OFFSET):
++         /* mmap offset not needed - vdrm_bo_map handles mapping */
++         errno = 0;
++         goto out;
++      default:
++         mesa_loge("unsupported Xe ioctl 0x%lx\n", _IOC_NR(cmd));
++         errno = ENOTTY;
++         goto out;
++      }
++   }
++
++#undef IOC_MASKED_XE
++
+    /*
+     * Special case for legacy ioctls that have same NR as extended ioctl
+     * and need to be handled differently.
+diff --git a/src/intel/dev/virtio/intel_virtio.h b/src/intel/dev/virtio/intel_virtio.h
+index 43866ef..197f3c4 100644
+--- a/src/intel/dev/virtio/intel_virtio.h
++++ b/src/intel/dev/virtio/intel_virtio.h
+@@ -20,6 +20,7 @@ void intel_virtio_unref_fd(int fd);
+ bool intel_virtio_get_pci_device_info(int fd,
+                                       struct intel_device_info *devinfo);
+ bool is_intel_virtio_fd(int fd);
++bool is_intel_virtio_xe(int fd);
+ void *intel_virtio_bo_mmap(int fd, uint32_t handle, size_t size, void *placed_addr);
+ struct util_sync_provider *intel_virtio_sync_provider(int fd);
+ #else
+@@ -43,6 +44,11 @@ static inline bool is_intel_virtio_fd(int fd)
+    return false;
+ }
+ 
++static inline bool is_intel_virtio_xe(int fd)
++{
++   return false;
++}
++
+ static inline void *
+ intel_virtio_bo_mmap(int fd, uint32_t handle, size_t size, void *placed_addr)
+ {
+diff --git a/src/intel/dev/virtio/intel_virtio_device.c b/src/intel/dev/virtio/intel_virtio_device.c
+index 07dda2a..910e664 100644
+--- a/src/intel/dev/virtio/intel_virtio_device.c
++++ b/src/intel/dev/virtio/intel_virtio_device.c
+@@ -43,6 +43,13 @@ bool is_intel_virtio_fd(int fd)
+    return fd_to_intel_virtio_device(fd) != NULL;
+ }
+ 
++bool
++is_intel_virtio_xe(int fd)
++{
++   struct intel_virtio_device *dev = fd_to_intel_virtio_device(fd);
++   return dev && dev->is_xe;
++}
++
+ bool
+ intel_virtio_get_pci_device_info(int fd, struct intel_device_info *devinfo)
+ {
+@@ -54,12 +61,21 @@ intel_virtio_get_pci_device_info(int fd, struct intel_device_info *devinfo)
+ 
+    caps = dev->vdrm->caps;
+ 
+-   devinfo->pci_bus = caps.u.intel.pci_bus;
+-   devinfo->pci_dev = caps.u.intel.pci_dev;
+-   devinfo->pci_func = caps.u.intel.pci_func;
+-   devinfo->pci_domain = caps.u.intel.pci_domain;
+-   devinfo->pci_device_id = caps.u.intel.pci_device_id;
+-   devinfo->pci_revision_id = caps.u.intel.pci_revision_id;
++   if (dev->is_xe) {
++      devinfo->pci_bus = caps.u.xe.pci_bus;
++      devinfo->pci_dev = caps.u.xe.pci_dev;
++      devinfo->pci_func = caps.u.xe.pci_func;
++      devinfo->pci_domain = caps.u.xe.pci_domain;
++      devinfo->pci_device_id = caps.u.xe.pci_device_id;
++      devinfo->pci_revision_id = caps.u.xe.pci_revision_id;
++   } else {
++      devinfo->pci_bus = caps.u.intel.pci_bus;
++      devinfo->pci_dev = caps.u.intel.pci_dev;
++      devinfo->pci_func = caps.u.intel.pci_func;
++      devinfo->pci_domain = caps.u.intel.pci_domain;
++      devinfo->pci_device_id = caps.u.intel.pci_device_id;
++      devinfo->pci_revision_id = caps.u.intel.pci_revision_id;
++   }
+ 
+    return true;
+ }
+@@ -103,7 +119,13 @@ int intel_virtio_init_fd(int fd)
+       dev->vdrm = vdrm_device_connect(-1, VIRTGPU_DRM_CONTEXT_I915);
+       dev->vpipe = true;
+    } else {
+-      dev->vdrm = vdrm_device_connect(fd, VIRTGPU_DRM_CONTEXT_I915);
++      /* Try Xe first, then fall back to i915 */
++      dev->vdrm = vdrm_device_connect(fd, VIRTGPU_DRM_CONTEXT_XE);
++      if (dev->vdrm) {
++         dev->is_xe = true;
++      } else {
++         dev->vdrm = vdrm_device_connect(fd, VIRTGPU_DRM_CONTEXT_I915);
++      }
+    }
+ 
+    if (!dev->vdrm) {
+diff --git a/src/intel/dev/virtio/intel_virtio_priv.h b/src/intel/dev/virtio/intel_virtio_priv.h
+index f520beb..13f02e7 100644
+--- a/src/intel/dev/virtio/intel_virtio_priv.h
++++ b/src/intel/dev/virtio/intel_virtio_priv.h
+@@ -18,6 +18,7 @@
+ 
+ #include "drm-uapi/drm.h"
+ #include "drm-uapi/i915_drm.h"
++#include "drm-uapi/xe_drm.h"
+ #include "drm-uapi/virtgpu_drm.h"
+ #include <xf86drm.h>
+ 
+@@ -57,6 +58,7 @@ struct intel_virtio_device {
+    uint32_t refcnt;
+ 
+    bool vpipe;
++   bool is_xe;
+ };
+ 
+ struct intel_virtio_device *fd_to_intel_virtio_device(int fd);
+@@ -64,4 +66,25 @@ struct intel_virtio_device *fd_to_intel_virtio_device(int fd);
+ int i915_virtio_gem_execbuffer2(struct intel_virtio_device *dev,
+                                 struct drm_i915_gem_execbuffer2 *exec);
+ 
++int xe_virtio_device_query(struct intel_virtio_device *dev,
++                           struct drm_xe_device_query *args);
++int xe_virtio_gem_create(struct intel_virtio_device *dev,
++                         struct drm_xe_gem_create *args);
++int xe_virtio_gem_close(struct intel_virtio_device *dev,
++                        struct drm_gem_close *args);
++int xe_virtio_vm_create(struct intel_virtio_device *dev,
++                        struct drm_xe_vm_create *args);
++int xe_virtio_vm_destroy(struct intel_virtio_device *dev,
++                         struct drm_xe_vm_destroy *args);
++int xe_virtio_vm_bind(struct intel_virtio_device *dev,
++                      struct drm_xe_vm_bind *args);
++int xe_virtio_exec_queue_create(struct intel_virtio_device *dev,
++                                struct drm_xe_exec_queue_create *args);
++int xe_virtio_exec_queue_destroy(struct intel_virtio_device *dev,
++                                 struct drm_xe_exec_queue_destroy *args);
++int xe_virtio_exec(struct intel_virtio_device *dev,
++                   struct drm_xe_exec *args);
++int xe_virtio_exec_queue_get_property(struct intel_virtio_device *dev,
++                                      struct drm_xe_exec_queue_get_property *args);
++
+ #endif /* INTEL_VIRTIO_PRIV_H_ */
+diff --git a/src/intel/dev/virtio/xe_virtio_ccmd.c b/src/intel/dev/virtio/xe_virtio_ccmd.c
+new file mode 100644
+index 0000000..ecec0d6
+--- /dev/null
++++ b/src/intel/dev/virtio/xe_virtio_ccmd.c
+@@ -0,0 +1,340 @@
++/*
++ * Copyright 2025 Collabora, Ltd.
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "intel_virtio_priv.h"
++#include "drm-uapi/xe_drm.h"
++#include "xe_virtio_proto.h"
++#include "util/u_math.h"
++
++int
++xe_virtio_device_query(struct intel_virtio_device *dev,
++                       struct drm_xe_device_query *args)
++{
++   struct xe_ccmd_device_query_rsp *rsp;
++   struct xe_ccmd_device_query_req req;
++   int err;
++
++   req.hdr = XE_CCMD(DEVICE_QUERY, sizeof(req));
++   req.query = args->query;
++   req.size = args->size;
++
++   rsp = vdrm_alloc_rsp(dev->vdrm, &req.hdr, sizeof(*rsp) + args->size);
++
++   err = vdrm_send_req(dev->vdrm, &req.hdr, true);
++   if (err)
++      return errno;
++
++   if (args->data && rsp->size > 0)
++      memcpy((void *)(uintptr_t)args->data, rsp->payload, rsp->size);
++
++   args->size = rsp->size;
++
++   return rsp->ret;
++}
++
++int
++xe_virtio_gem_create(struct intel_virtio_device *dev,
++                     struct drm_xe_gem_create *args)
++{
++   uint32_t blob_flags = VIRTGPU_BLOB_FLAG_USE_MAPPABLE |
++                         VIRTGPU_BLOB_FLAG_USE_SHAREABLE;
++
++   if (dev->vdrm->supports_cross_device)
++      blob_flags |= VIRTGPU_BLOB_FLAG_USE_CROSS_DEVICE;
++
++   struct xe_ccmd_gem_create_req req = {
++      .hdr = XE_CCMD(GEM_CREATE, sizeof(req)),
++      .size = args->size,
++      .placement = args->placement,
++      .flags = args->flags,
++      .vm_id = args->vm_id,
++      .cpu_caching = args->cpu_caching,
++   };
++
++   req.blob_id = p_atomic_inc_return(&dev->next_blob_id);
++
++   int ret = vdrm_bo_create(dev->vdrm, args->size, blob_flags,
++                            req.blob_id, &req.hdr);
++   if (!ret)
++      return EINVAL;
++
++   args->handle = ret;
++
++   return 0;
++}
++
++int
++xe_virtio_gem_close(struct intel_virtio_device *dev,
++                    struct drm_gem_close *args)
++{
++   vdrm_bo_close(dev->vdrm, args->handle);
++   return 0;
++}
++
++int
++xe_virtio_vm_create(struct intel_virtio_device *dev,
++                    struct drm_xe_vm_create *args)
++{
++   struct xe_ccmd_vm_create_rsp *rsp;
++   struct xe_ccmd_vm_create_req req;
++   int err;
++
++   req.hdr = XE_CCMD(VM_CREATE, sizeof(req));
++   req.flags = args->flags;
++   req.pad = 0;
++
++   rsp = vdrm_alloc_rsp(dev->vdrm, &req.hdr, sizeof(*rsp));
++
++   err = vdrm_send_req(dev->vdrm, &req.hdr, true);
++   if (err)
++      return errno;
++
++   args->vm_id = rsp->vm_id;
++
++   return rsp->ret;
++}
++
++int
++xe_virtio_vm_destroy(struct intel_virtio_device *dev,
++                     struct drm_xe_vm_destroy *args)
++{
++   struct xe_ccmd_vm_destroy_req req;
++
++   req.hdr = XE_CCMD(VM_DESTROY, sizeof(req));
++   req.vm_id = args->vm_id;
++   req.pad = 0;
++
++   return vdrm_send_req(dev->vdrm, &req.hdr, false);
++}
++
++int
++xe_virtio_vm_bind(struct intel_virtio_device *dev,
++                  struct drm_xe_vm_bind *args)
++{
++   struct xe_ccmd_vm_bind_rsp *rsp;
++   uint32_t num_binds = args->num_binds;
++   struct drm_xe_vm_bind_op *bind_ops;
++   int err;
++
++   if (num_binds == 1) {
++      bind_ops = &args->bind;
++   } else {
++      bind_ops = (struct drm_xe_vm_bind_op *)(uintptr_t)args->vector_of_binds;
++   }
++
++   unsigned req_len = sizeof(struct xe_ccmd_vm_bind_req) +
++                      num_binds * sizeof(struct xe_ccmd_vm_bind_op);
++
++   uint8_t buf[req_len];
++   struct xe_ccmd_vm_bind_req *req = (void *)buf;
++   struct xe_ccmd_vm_bind_op *ccmd_ops = (void *)req->payload;
++
++   req->hdr = XE_CCMD(VM_BIND, req_len);
++   req->vm_id = args->vm_id;
++   req->num_binds = num_binds;
++
++   for (uint32_t i = 0; i < num_binds; i++) {
++      uint32_t handle = bind_ops[i].obj;
++
++      ccmd_ops[i].res_id = handle ? vdrm_handle_to_res_id(dev->vdrm, handle) : 0;
++      ccmd_ops[i].pat_index = bind_ops[i].pat_index;
++      ccmd_ops[i].pad = 0;
++      ccmd_ops[i].obj_offset = bind_ops[i].obj_offset;
++      ccmd_ops[i].range = bind_ops[i].range;
++      ccmd_ops[i].addr = bind_ops[i].addr;
++      ccmd_ops[i].op = bind_ops[i].op;
++      ccmd_ops[i].flags = bind_ops[i].flags;
++   }
++
++   rsp = vdrm_alloc_rsp(dev->vdrm, &req->hdr, sizeof(*rsp));
++
++   err = vdrm_send_req(dev->vdrm, &req->hdr, true);
++   if (err)
++      return errno;
++
++   if (rsp->ret)
++      return rsp->ret;
++
++   /* VM_BIND is synchronous in the ccmd model.  Signal any out-syncobjs
++    * the caller attached.
++    */
++   if (args->num_syncs) {
++      struct drm_xe_sync *syncs = (void *)(uintptr_t)args->syncs;
++
++      for (uint32_t i = 0; i < args->num_syncs; i++) {
++         if (!(syncs[i].flags & DRM_XE_SYNC_FLAG_SIGNAL))
++            continue;
++
++         if (syncs[i].type == DRM_XE_SYNC_TYPE_SYNCOBJ) {
++            struct drm_syncobj_array sa = {
++               .handles = (uintptr_t)&syncs[i].handle,
++               .count_handles = 1,
++            };
++            dev->sync->signal(dev->sync,
++                              (uint32_t *)(uintptr_t)sa.handles,
++                              sa.count_handles);
++         } else if (syncs[i].type == DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ) {
++            uint64_t point = syncs[i].timeline_value;
++            dev->sync->timeline_signal(dev->sync,
++                                       &syncs[i].handle,
++                                       &point, 1);
++         }
++      }
++   }
++
++   return 0;
++}
++
++int
++xe_virtio_exec_queue_create(struct intel_virtio_device *dev,
++                            struct drm_xe_exec_queue_create *args)
++{
++   struct xe_ccmd_exec_queue_create_rsp *rsp;
++   struct drm_xe_engine_class_instance *instances;
++   int err;
++
++   instances = (void *)(uintptr_t)args->instances;
++
++   unsigned instances_size = sizeof(struct drm_xe_engine_class_instance) *
++                             args->width * args->num_placements;
++   unsigned req_len = sizeof(struct xe_ccmd_exec_queue_create_req) + instances_size;
++
++   uint8_t buf[req_len];
++   struct xe_ccmd_exec_queue_create_req *req = (void *)buf;
++
++   req->hdr = XE_CCMD(EXEC_QUEUE_CREATE, req_len);
++   req->vm_id = args->vm_id;
++   req->flags = args->flags;
++   req->width = args->width;
++   req->num_placements = args->num_placements;
++   req->pad = 0;
++   memcpy(req->payload, instances, instances_size);
++
++   rsp = vdrm_alloc_rsp(dev->vdrm, &req->hdr, sizeof(*rsp));
++
++   err = vdrm_send_req(dev->vdrm, &req->hdr, true);
++   if (err)
++      return errno;
++
++   args->exec_queue_id = rsp->exec_queue_id;
++
++   return rsp->ret;
++}
++
++int
++xe_virtio_exec_queue_destroy(struct intel_virtio_device *dev,
++                             struct drm_xe_exec_queue_destroy *args)
++{
++   struct xe_ccmd_exec_queue_destroy_req req;
++
++   req.hdr = XE_CCMD(EXEC_QUEUE_DESTROY, sizeof(req));
++   req.exec_queue_id = args->exec_queue_id;
++   req.pad = 0;
++
++   return vdrm_send_req(dev->vdrm, &req.hdr, false);
++}
++
++int
++xe_virtio_exec(struct intel_virtio_device *dev,
++               struct drm_xe_exec *args)
++{
++   struct drm_xe_sync *xe_syncs = (void *)(uintptr_t)args->syncs;
++   uint32_t n_in = 0;
++   bool has_out = false;
++
++   /* Count in-syncs, skipping timeline for in-syncs only */
++   for (uint32_t i = 0; i < args->num_syncs; i++) {
++      if (xe_syncs[i].flags & DRM_XE_SYNC_FLAG_SIGNAL) {
++         has_out = true;
++      } else {
++         /* Skip timeline syncobjs for in-syncs */
++         if (xe_syncs[i].type != DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ)
++            n_in++;
++      }
++   }
++
++   struct drm_virtgpu_execbuffer_syncobj *in_so = NULL;
++   if (n_in) {
++      in_so = calloc(n_in, sizeof(*in_so));
++      if (!in_so)
++         return ENOMEM;
++   }
++
++   /* Fill in-syncs from xe_syncs */
++   uint32_t w = 0;
++   for (uint32_t i = 0; i < args->num_syncs; i++) {
++      if (xe_syncs[i].flags & DRM_XE_SYNC_FLAG_SIGNAL)
++         continue;
++      if (xe_syncs[i].type == DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ)
++         continue;
++
++      in_so[w].handle = xe_syncs[i].handle;
++      if (xe_syncs[i].type == DRM_XE_SYNC_TYPE_SYNCOBJ)
++         in_so[w].point = 0;
++      w++;
++   }
++
++   struct xe_ccmd_exec_req ccmd_req = {
++      .hdr = XE_CCMD(EXEC, sizeof(ccmd_req)),
++      .exec_queue_id = args->exec_queue_id,
++      .num_batch_buffer = args->num_batch_buffer,
++      .address = args->address,
++   };
++
++   struct xe_ccmd_exec_rsp *rsp;
++   rsp = vdrm_alloc_rsp(dev->vdrm, &ccmd_req.hdr, sizeof(*rsp));
++
++   struct vdrm_execbuf_params p = {
++      .req = &ccmd_req.hdr,
++      .ring_idx = 0,
++      .in_syncobjs = in_so,
++      .num_in_syncobjs = n_in,
++      .needs_out_fence_fd = has_out,
++      .fence_fd = -1,
++   };
++
++   int ret = vdrm_execbuf(dev->vdrm, &p);
++
++   if (!ret && p.fence_fd >= 0) {
++      /* Import the fence_fd into each out-syncobj */
++      for (uint32_t i = 0; i < args->num_syncs; i++) {
++         if (!(xe_syncs[i].flags & DRM_XE_SYNC_FLAG_SIGNAL))
++            continue;
++
++         struct drm_syncobj_handle sh = {
++            .handle = xe_syncs[i].handle,
++            .flags = DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE,
++            .fd = p.fence_fd,
++         };
++         drmIoctl(dev->fd, DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE, &sh);
++      }
++      close(p.fence_fd);
++   }
++
++   free(in_so);
++
++   return ret;
++}
++
++int
++xe_virtio_exec_queue_get_property(struct intel_virtio_device *dev,
++                                  struct drm_xe_exec_queue_get_property *args)
++{
++   if (args->property == DRM_XE_EXEC_QUEUE_GET_PROPERTY_BAN) {
++      struct xe_shmem *shmem = to_xe_shmem(dev->vdrm->shmem);
++
++      if (args->exec_queue_id < 64 &&
++          (p_atomic_read(&shmem->banned_exec_queue_mask) &
++           (1ULL << args->exec_queue_id))) {
++         args->value = 1;
++      } else {
++         args->value = 0;
++      }
++
++      return 0;
++   }
++
++   return EINVAL;
++}
+diff --git a/src/intel/dev/virtio/xe_virtio_proto.h b/src/intel/dev/virtio/xe_virtio_proto.h
+new file mode 100644
+index 0000000..154e184
+--- /dev/null
++++ b/src/intel/dev/virtio/xe_virtio_proto.h
+@@ -0,0 +1,221 @@
++/*
++ * Copyright 2025 Collabora, Ltd.
++ * SPDX-License-Identifier: MIT
++ */
++
++#ifndef XE_VIRTIO_PROTO_H_
++#define XE_VIRTIO_PROTO_H_
++
++#include "virtio/virtio-gpu/drm_hw.h"
++
++#ifdef __GNUC__
++# pragma GCC diagnostic push
++# pragma GCC diagnostic error "-Wpadded"
++#endif
++
++#define XE_STATIC_ASSERT_SIZE(t) \
++   static_assert(sizeof(struct t) % 8 == 0, "sizeof(struct " #t ") not multiple of 8"); \
++   static_assert(alignof(struct t) <= 8, "alignof(struct " #t ") too large");
++
++#define XE_DEFINE_CAST(parent, child)                                          \
++   XE_STATIC_ASSERT_SIZE(child)                                               \
++   DEFINE_CAST(parent, child)                                                  \
++
++/*
++ * XE_CCMD_NOP
++ */
++struct xe_ccmd_nop_req {
++   struct vdrm_ccmd_req hdr;
++};
++XE_DEFINE_CAST(vdrm_ccmd_req, xe_ccmd_nop_req)
++
++enum xe_ccmd {
++   XE_CCMD_NOP = 0,
++   XE_CCMD_DEVICE_QUERY = 1,
++   XE_CCMD_GEM_CREATE = 2,
++   XE_CCMD_VM_CREATE = 3,
++   XE_CCMD_VM_DESTROY = 4,
++   XE_CCMD_VM_BIND = 5,
++   XE_CCMD_EXEC_QUEUE_CREATE = 6,
++   XE_CCMD_EXEC_QUEUE_DESTROY = 7,
++   XE_CCMD_EXEC = 8,
++};
++
++#define XE_CCMD(_cmd, _len) (struct vdrm_ccmd_req){    \
++       .cmd = XE_CCMD_##_cmd,                          \
++       .len = (_len),                                   \
++   }
++
++/**
++ * Defines the layout of shmem buffer used for host->guest communication.
++ */
++struct xe_shmem {
++   struct vdrm_shmem base;
++
++   /**
++    * Bitmask of banned exec queue IDs.
++    */
++   uint64_t banned_exec_queue_mask;
++};
++DEFINE_CAST(vdrm_shmem, xe_shmem)
++
++/*
++ * XE_CCMD_DEVICE_QUERY
++ */
++struct xe_ccmd_device_query_req {
++   struct vdrm_ccmd_req hdr;
++
++   uint32_t query;
++   uint32_t size;
++};
++XE_DEFINE_CAST(vdrm_ccmd_req, xe_ccmd_device_query_req)
++
++struct xe_ccmd_device_query_rsp {
++   struct vdrm_ccmd_rsp hdr;
++   uint32_t pad;
++
++   int32_t ret;
++   uint32_t size;
++   uint8_t payload[];
++};
++XE_STATIC_ASSERT_SIZE(xe_ccmd_device_query_rsp)
++
++/*
++ * XE_CCMD_GEM_CREATE
++ */
++struct xe_ccmd_gem_create_req {
++   struct vdrm_ccmd_req hdr;
++
++   uint64_t size;
++   uint32_t placement;
++   uint32_t flags;
++   uint32_t vm_id;
++   uint32_t blob_id;
++   uint16_t cpu_caching;
++   uint16_t pad[3];
++};
++XE_DEFINE_CAST(vdrm_ccmd_req, xe_ccmd_gem_create_req)
++
++/*
++ * XE_CCMD_VM_CREATE
++ */
++struct xe_ccmd_vm_create_req {
++   struct vdrm_ccmd_req hdr;
++
++   uint32_t flags;
++   uint32_t pad;
++};
++XE_DEFINE_CAST(vdrm_ccmd_req, xe_ccmd_vm_create_req)
++
++struct xe_ccmd_vm_create_rsp {
++   struct vdrm_ccmd_rsp hdr;
++   uint32_t pad;
++
++   int32_t ret;
++   uint32_t vm_id;
++};
++XE_STATIC_ASSERT_SIZE(xe_ccmd_vm_create_rsp)
++
++/*
++ * XE_CCMD_VM_DESTROY
++ */
++struct xe_ccmd_vm_destroy_req {
++   struct vdrm_ccmd_req hdr;
++
++   uint32_t vm_id;
++   uint32_t pad;
++};
++XE_DEFINE_CAST(vdrm_ccmd_req, xe_ccmd_vm_destroy_req)
++
++/*
++ * XE_CCMD_VM_BIND
++ */
++struct xe_ccmd_vm_bind_op {
++   uint32_t res_id;
++   uint16_t pat_index;
++   uint16_t pad;
++   uint64_t obj_offset;
++   uint64_t range;
++   uint64_t addr;
++   uint32_t op;
++   uint32_t flags;
++};
++XE_STATIC_ASSERT_SIZE(xe_ccmd_vm_bind_op)
++
++struct xe_ccmd_vm_bind_req {
++   struct vdrm_ccmd_req hdr;
++
++   uint32_t vm_id;
++   uint32_t num_binds;
++   uint8_t payload[];
++};
++XE_DEFINE_CAST(vdrm_ccmd_req, xe_ccmd_vm_bind_req)
++
++struct xe_ccmd_vm_bind_rsp {
++   struct vdrm_ccmd_rsp hdr;
++   uint32_t pad;
++
++   int32_t ret;
++   uint32_t pad2;
++};
++XE_STATIC_ASSERT_SIZE(xe_ccmd_vm_bind_rsp)
++
++/*
++ * XE_CCMD_EXEC_QUEUE_CREATE
++ */
++struct xe_ccmd_exec_queue_create_req {
++   struct vdrm_ccmd_req hdr;
++
++   uint32_t vm_id;
++   uint32_t flags;
++   uint16_t width;
++   uint16_t num_placements;
++   uint32_t pad;
++   uint8_t payload[];
++};
++XE_DEFINE_CAST(vdrm_ccmd_req, xe_ccmd_exec_queue_create_req)
++
++struct xe_ccmd_exec_queue_create_rsp {
++   struct vdrm_ccmd_rsp hdr;
++   uint32_t pad;
++
++   int32_t ret;
++   uint32_t exec_queue_id;
++};
++XE_STATIC_ASSERT_SIZE(xe_ccmd_exec_queue_create_rsp)
++
++/*
++ * XE_CCMD_EXEC_QUEUE_DESTROY
++ */
++struct xe_ccmd_exec_queue_destroy_req {
++   struct vdrm_ccmd_req hdr;
++
++   uint32_t exec_queue_id;
++   uint32_t pad;
++};
++XE_DEFINE_CAST(vdrm_ccmd_req, xe_ccmd_exec_queue_destroy_req)
++
++/*
++ * XE_CCMD_EXEC
++ */
++struct xe_ccmd_exec_req {
++   struct vdrm_ccmd_req hdr;
++
++   uint32_t exec_queue_id;
++   uint16_t num_batch_buffer;
++   uint16_t pad;
++   uint64_t address;
++};
++XE_DEFINE_CAST(vdrm_ccmd_req, xe_ccmd_exec_req)
++
++struct xe_ccmd_exec_rsp {
++   struct vdrm_ccmd_rsp hdr;
++   int32_t ret;
++};
++XE_STATIC_ASSERT_SIZE(xe_ccmd_exec_rsp)
++
++#ifdef __GNUC__
++# pragma GCC diagnostic pop
++#endif
++
++#endif /* XE_VIRTIO_PROTO_H_ */
+diff --git a/src/virtio/virtio-gpu/drm_hw.h b/src/virtio/virtio-gpu/drm_hw.h
+index 9f7244c..4774ab8 100644
+--- a/src/virtio/virtio-gpu/drm_hw.h
++++ b/src/virtio/virtio-gpu/drm_hw.h
+@@ -31,6 +31,7 @@ struct virgl_renderer_capset_drm {
+ #define VIRTGPU_DRM_CONTEXT_MSM      1
+ #define VIRTGPU_DRM_CONTEXT_AMDGPU   2
+ #define VIRTGPU_DRM_CONTEXT_I915     3
++#define VIRTGPU_DRM_CONTEXT_XE       6
+    uint32_t context_type;
+    uint32_t pad;
+    union {
+@@ -69,6 +70,14 @@ struct virgl_renderer_capset_drm {
+          uint32_t pci_domain;
+          uint32_t pci_device_id;
+       } intel;  /* context_type == VIRTGPU_DRM_CONTEXT_I915 */
++      struct {
++         uint32_t pci_bus;
++         uint32_t pci_dev;
++         uint32_t pci_func;
++         uint32_t pci_revision_id;
++         uint32_t pci_domain;
++         uint32_t pci_device_id;
++      } xe;  /* context_type == VIRTGPU_DRM_CONTEXT_XE */
+    } u;
+ };
+ 
