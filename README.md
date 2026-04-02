@@ -9,6 +9,13 @@ I started with i915 drivers, and then troubleshoot issues as they came up to get
 
 With these patches, vulkan works, vaapi works (you will need to patch the intel media driver, and force i915 for LIBVA driver), OpenGL is probably not implemented right and has performance issues with 2D. So it's recommended to use Zink for opengl for now. This can be done by applying the mesa-xe-zink patch to mesa, instead of the mesa-xe-native-context.patch, to enable zink by default.
 
+Patches:
+- intel-media-driver-xe-native-context.patch (Apply this to intel-media-driver to get VAAPI working in the VM)
+- mesa-xe-native-context.patch (Don't apply this at all, use mesa-xe-zink instead, unless you want to have a bad time with opengl)
+- mesa-xe-zink.patch (Apply this to mesa on guest instead of mesa-xe-native-context to enable zink for opengl and have a good time)
+- virglrenderer-xe-native-context.patch (Apply this to virglrenderer on host)
+
+
 Important qemu settings -- Use very recent qemu from git:
 
 ```
