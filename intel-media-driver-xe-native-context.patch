@@ -1,7 +1,8 @@
-diff --color -ruN a/media_driver/media_top_cmake.cmake b/media_driver/media_top_cmake.cmake
---- a/media_driver/media_top_cmake.cmake	2025-12-19 18:28:21.000000000 +0900
-+++ b/media_driver/media_top_cmake.cmake	2026-04-02 05:51:36.965850772 +0900
-@@ -605,14 +605,14 @@
+diff --git a/media_driver/media_top_cmake.cmake b/media_driver/media_top_cmake.cmake
+index 9d1c9b4..d7a0a3c 100755
+--- a/media_driver/media_top_cmake.cmake
++++ b/media_driver/media_top_cmake.cmake
+@@ -605,14 +605,14 @@ set_target_properties(${LIB_NAME_STATIC} PROPERTIES OUTPUT_NAME ${LIB_NAME})
  
  option(MEDIA_BUILD_FATAL_WARNINGS "Turn compiler warnings into fatal errors" ON)
  if(MEDIA_BUILD_FATAL_WARNINGS)
@@ -24,10 +25,11 @@ diff --color -ruN a/media_driver/media_top_cmake.cmake b/media_driver/media_top_
  endif()
  
  set(MEDIA_LINK_FLAGS "-Wl,--no-as-needed -Wl,--gc-sections -z relro -z now -fPIC")
-diff --color -ruN a/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h b/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h
---- a/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h	2025-12-19 18:28:21.000000000 +0900
-+++ b/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h	2026-04-02 05:51:18.487896615 +0900
-@@ -419,14 +419,16 @@
+diff --git a/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h b/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h
+index 4e67df8..b10acbd 100644
+--- a/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h
++++ b/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h
+@@ -419,14 +419,16 @@ extern "C" {
  #endif
  extern drm_export int drmIoctl(int fd, unsigned long request, void *arg);
  
@@ -46,7 +48,7 @@ diff --color -ruN a/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h 
      version.name = name;
  
      if (drmIoctl(fd, DRM_IOCTL_VERSION, &version))
-@@ -443,6 +445,10 @@
+@@ -443,6 +445,10 @@ static inline int mos_query_device_type(int fd)
      {
          device_type = DEVICE_TYPE_XE;
      }
@@ -57,10 +59,11 @@ diff --color -ruN a/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h 
      else
      {
          fprintf(stderr, "DRM_IOCTL_VERSION, unsupported drm device by media driver: %s\n", name);
-diff --color -ruN a/media_softlet/linux/common/os/xe/media_srcs.cmake b/media_softlet/linux/common/os/xe/media_srcs.cmake
---- a/media_softlet/linux/common/os/xe/media_srcs.cmake	2025-12-19 18:28:21.000000000 +0900
-+++ b/media_softlet/linux/common/os/xe/media_srcs.cmake	2026-04-02 05:51:28.253872562 +0900
-@@ -24,10 +24,12 @@
+diff --git a/media_softlet/linux/common/os/xe/media_srcs.cmake b/media_softlet/linux/common/os/xe/media_srcs.cmake
+index 9f88489..43238a0 100644
+--- a/media_softlet/linux/common/os/xe/media_srcs.cmake
++++ b/media_softlet/linux/common/os/xe/media_srcs.cmake
+@@ -24,10 +24,12 @@ set(TMP_SOURCES_
      ${CMAKE_CURRENT_LIST_DIR}/mos_bufmgr_xe.c
      ${CMAKE_CURRENT_LIST_DIR}/mos_synchronization_xe.c
      ${CMAKE_CURRENT_LIST_DIR}/mos_gpucontext_specific_next_xe.cpp
@@ -73,9 +76,10 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/media_srcs.cmake b/media_so
  )
  
  set(SOFTLET_MOS_COMMON_SOURCES_
-diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c
---- a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c	2025-12-19 18:28:21.000000000 +0900
-+++ b/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c	2026-04-02 06:06:11.509513773 +0900
+diff --git a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c
+index 026d7b0..a41d083 100644
+--- a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c
++++ b/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c
 @@ -72,6 +72,7 @@
  #include "libdrm_lists.h"
  #include "mos_bufmgr_xe.h"
@@ -84,7 +88,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
  #include "mos_utilities.h"
  #include "mos_bufmgr_util_debug.h"
  #include "media_user_setting_value.h"
-@@ -490,7 +491,7 @@
+@@ -490,7 +491,7 @@ __mos_query_gt_list_xe(int fd)
      memclear(query);
      query.query = DRM_XE_DEVICE_QUERY_GT_LIST;
  
@@ -93,7 +97,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
                  &query);
      if (ret || !query.size)
      {
-@@ -501,7 +502,7 @@
+@@ -501,7 +502,7 @@ __mos_query_gt_list_xe(int fd)
      MOS_DRM_CHK_NULL_RETURN_VALUE(gt_list, nullptr);
  
      query.data = (uintptr_t)(gt_list);
@@ -102,7 +106,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
                  &query);
      if (ret || !query.size || 0 == gt_list->num_gt)
      {
-@@ -545,7 +546,7 @@
+@@ -545,7 +546,7 @@ __mos_query_mem_regions_xe(int fd)
      memclear(query);
      query.query = DRM_XE_DEVICE_QUERY_MEM_REGIONS;
  
@@ -111,7 +115,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
                  &query);
      if (ret || !query.size)
      {
-@@ -556,7 +557,7 @@
+@@ -556,7 +557,7 @@ __mos_query_mem_regions_xe(int fd)
      MOS_DRM_CHK_NULL_RETURN_VALUE(mem_regions, nullptr);
  
      query.data = (uintptr_t)(mem_regions);
@@ -120,7 +124,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret || !query.size || 0 == mem_regions->num_mem_regions)
      {
          MOS_XE_SAFE_FREE(mem_regions);
-@@ -601,7 +602,7 @@
+@@ -601,7 +602,7 @@ __mos_query_config_xe(int fd)
  
      memclear(query);
      query.query = DRM_XE_DEVICE_QUERY_CONFIG;
@@ -129,7 +133,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret || !query.size)
      {
          return nullptr;
-@@ -619,7 +620,7 @@
+@@ -619,7 +620,7 @@ __mos_query_config_xe(int fd)
      }
  
      query.data = (uintptr_t)config;
@@ -138,7 +142,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret || !query.size || 0 == config->num_params)
      {
          MOS_XE_SAFE_FREE(config);
-@@ -691,7 +692,7 @@
+@@ -691,7 +692,7 @@ mos_query_uc_version_xe(struct mos_bufmgr *bufmgr, struct mos_drm_uc_version *ve
              dev->uc_versions[version->uc_type].uc_type = version->uc_type;
              query.data = (uintptr_t)&dev->uc_versions[version->uc_type];
  
@@ -147,7 +151,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
                          &query);
              if (ret)
              {
-@@ -825,7 +826,7 @@
+@@ -825,7 +826,7 @@ __mos_vm_create_xe(struct mos_bufmgr *bufmgr)
      int ret;
  
      memclear(vm);
@@ -156,7 +160,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret != 0)
      {
          MOS_DRM_ASSERTMESSAGE("DRM_IOCTL_XE_VM_CREATE failed: %s",
-@@ -851,7 +852,7 @@
+@@ -851,7 +852,7 @@ __mos_vm_destroy_xe(struct mos_bufmgr *bufmgr, uint32_t vm_id)
  
      memclear(vm_destroy);
      vm_destroy.vm_id = vm_id;
@@ -165,7 +169,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret != 0)
      {
          MOS_DRM_ASSERTMESSAGE("DRM_IOCTL_XE_VM_DESTROY failed: %s",
-@@ -965,7 +966,7 @@
+@@ -965,7 +966,7 @@ mos_context_create_shared_xe(
      
      create.extensions = (uintptr_t)ext;
  
@@ -174,7 +178,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
  
      MOS_DRM_CHK_STATUS_MESSAGE_RETURN_VALUE_WH_OP(ret, context, MOS_Delete, nullptr,
                  "ioctl failed in DRM_IOCTL_XE_EXEC_QUEUE_CREATE, return error(%d)", ret);
-@@ -1056,7 +1057,7 @@
+@@ -1056,7 +1057,7 @@ mos_context_destroy_xe(struct mos_linux_context *ctx)
      memclear(exec_queue_destroy);
      exec_queue_destroy.exec_queue_id = ctx->ctx_id;
  
@@ -183,7 +187,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret != 0)
          MOS_DRM_ASSERTMESSAGE("DRM_IOCTL_XE_EXEC_QUEUE_DESTROY failed: %s", strerror(errno));
  
-@@ -1106,7 +1107,7 @@
+@@ -1106,7 +1107,7 @@ __mos_context_restore_xe(struct mos_bufmgr *bufmgr,
      create.vm_id = context->ctx.vm_id;
      create.flags = context->flags;
      create.instances = (uintptr_t)engine_map;
@@ -192,7 +196,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      MOS_DRM_CHK_STATUS_MESSAGE_RETURN(ret,
                  "ioctl failed in DRM_IOCTL_XE_EXEC_QUEUE_CREATE of restore, return error(%d)", ret)
  
-@@ -1114,7 +1115,7 @@
+@@ -1114,7 +1115,7 @@ __mos_context_restore_xe(struct mos_bufmgr *bufmgr,
      struct drm_xe_exec_queue_destroy exec_queue_destroy;
      memclear(exec_queue_destroy);
      exec_queue_destroy.exec_queue_id = ctx->ctx_id;
@@ -201,7 +205,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      MOS_DRM_CHK_STATUS_MESSAGE_RETURN(ret,
                  "ioctl failed in DRM_IOCTL_XE_EXEC_QUEUE_DESTROY of restore, return error(%d)", ret)
  
-@@ -1146,7 +1147,7 @@
+@@ -1146,7 +1147,7 @@ __mos_get_context_property_xe(struct mos_bufmgr *bufmgr,
      p.property = property;
      p.exec_queue_id = ctx->ctx_id;
  
@@ -210,7 +214,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
  
      value = p.value;
      return ret;
-@@ -1247,7 +1248,7 @@
+@@ -1247,7 +1248,7 @@ static int __mos_vm_bind_xe(int fd, uint32_t vm_id, uint32_t exec_queue_id, uint
      bind.num_syncs = num_syncs;
      bind.syncs = (uintptr_t)sync;
  
@@ -219,7 +223,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret)
      {
          MOS_DRM_ASSERTMESSAGE("Failed to bind vm, vm_id:%d, exec_queue_id:%d, op:0x%x, flags:0x%x, bo_handle:%d, offset:%lx, addr:0x%lx, size:%ld, pat_index:%d, errno(%d)",
-@@ -1373,7 +1374,7 @@
+@@ -1373,7 +1374,7 @@ mos_bo_alloc_xe(struct mos_bufmgr *bufmgr,
          create.flags |= DRM_XE_GEM_CREATE_FLAG_SCANOUT;
      }
  
@@ -228,7 +232,39 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
          DRM_IOCTL_XE_GEM_CREATE,
          &create);
      MOS_DRM_CHK_STATUS_MESSAGE_RETURN_VALUE_WH_OP(ret, bo_gem, MOS_Delete, nullptr,
-@@ -2051,25 +2052,40 @@
+@@ -1625,7 +1626,12 @@ mos_bo_create_from_prime_xe(struct mos_bufmgr *bufmgr, struct mos_drm_bo_alloc_p
+     drmMMListHead *list;
+ 
+     bufmgr_gem->m_lock.lock();
+-    ret = drmPrimeFDToHandle(bufmgr_gem->fd, prime_fd, &handle);
++    {
++        struct drm_prime_handle args = {};
++        args.fd = prime_fd;
++        ret = mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, &args);
++        handle = args.handle;
++    }
+     if (ret)
+     {
+         MOS_DRM_ASSERTMESSAGE("create_from_prime: failed to obtain handle from fd: %s", strerror(errno));
+@@ -1732,9 +1738,14 @@ mos_bo_export_to_prime_xe(struct mos_linux_bo *bo, int *prime_fd)
+ 
+     mos_gem_bo_wait_rendering_xe(bo);
+ 
+-    if (drmPrimeHandleToFD(bufmgr_gem->fd, bo_gem->gem_handle,
+-                   DRM_CLOEXEC, prime_fd) != 0)
+-        return -errno;
++    {
++        struct drm_prime_handle args = {};
++        args.handle = bo_gem->gem_handle;
++        args.flags = DRM_CLOEXEC;
++        if (mos_xe_ioctl(bufmgr_gem->fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &args) != 0)
++            return -errno;
++        *prime_fd = args.fd;
++    }
+ 
+     bo_gem->is_exported = true;
+ 
+@@ -2051,25 +2062,40 @@ mos_bo_map_xe(struct mos_linux_bo *bo, int write_enable)
      bufmgr_gem->m_lock.lock();
      if (nullptr == bo_gem->mem_virtual)
      {
@@ -285,7 +321,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
          }
      }
  
-@@ -2430,7 +2446,7 @@
+@@ -2430,7 +2456,7 @@ __mos_bo_context_exec_retry_xe(struct mos_bufmgr *bufmgr,
          curr_exec_queue_id = ctx->ctx_id;
          exec.exec_queue_id = curr_exec_queue_id;
          //try once again to submit
@@ -294,7 +330,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
          if (ret)
          {
              MOS_DRM_ASSERTMESSAGE("Failed to re-submission in DRM_IOCTL_XE_EXEC(errno:%d): new exec_queue_id = %d",
-@@ -2563,7 +2579,7 @@
+@@ -2563,7 +2589,7 @@ mos_bo_context_exec_with_sync_xe(struct mos_linux_bo **bo, int num_bo, struct mo
      */
      exec.address = (num_bo == 1 ? (uintptr_t)batch_addrs[0] : (uintptr_t)batch_addrs);
      exec.num_batch_buffer = num_bo;
@@ -303,7 +339,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret)
      {
          MOS_DRM_ASSERTMESSAGE("Failed to submission in DRM_IOCTL_XE_EXEC(errno:%d): exec_queue_id = %d, num_syncs = %d, num_bo = %d",
-@@ -2661,7 +2677,7 @@
+@@ -2661,7 +2687,7 @@ __mos_query_engines_xe(int fd)
      query.size = 0;
      query.data = 0;
  
@@ -312,7 +348,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret || !query.size)
      {
          MOS_DRM_ASSERTMESSAGE("ret:%d, length:%d", ret, query.size);
-@@ -2672,7 +2688,7 @@
+@@ -2672,7 +2698,7 @@ __mos_query_engines_xe(int fd)
      MOS_DRM_CHK_NULL_RETURN_VALUE(engines, nullptr)
  
      query.data = (uintptr_t)engines;
@@ -321,7 +357,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret || !query.size)
      {
          MOS_DRM_ASSERTMESSAGE("ret:%d, length:%d", ret, query.size);
-@@ -2865,7 +2881,7 @@
+@@ -2865,7 +2891,7 @@ __mos_query_hw_config_xe(int fd)
      memclear(query);
      query.query = DRM_XE_DEVICE_QUERY_HWCONFIG;
  
@@ -330,7 +366,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret || !query.size)
      {
          MOS_DRM_ASSERTMESSAGE("ret:%d, length:%d", ret, query.size);
-@@ -2876,7 +2892,7 @@
+@@ -2876,7 +2902,7 @@ __mos_query_hw_config_xe(int fd)
      MOS_DRM_CHK_NULL_RETURN_VALUE(hw_config, nullptr)
  
      query.data = (uintptr_t)&hw_config[1];
@@ -339,7 +375,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      if (ret != 0 || query.size <= 0)
      {
          MOS_DRM_ASSERTMESSAGE("ret:%d, length:%d", ret, query.size);
-@@ -3043,7 +3059,7 @@
+@@ -3043,7 +3069,7 @@ mos_bo_free_xe(struct mos_linux_bo *bo)
          /* Close this object */
           memclear(close_ioctl);
           close_ioctl.handle = bo_gem->gem_handle;
@@ -348,7 +384,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
           if (ret != 0)
           {
               MOS_DRM_ASSERTMESSAGE("DRM_IOCTL_GEM_CLOSE %d failed (%s): %s",
-@@ -3122,6 +3138,8 @@
+@@ -3122,6 +3148,8 @@ mos_bufmgr_gem_destroy_xe(struct mos_bufmgr *bufmgr)
      MOS_XE_SAFE_FREE(dev->gt_list);
      dev->gt_list = nullptr;
  
@@ -357,7 +393,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      MOS_Delete(bufmgr_gem);
  }
  
-@@ -3595,6 +3613,17 @@
+@@ -3595,6 +3623,17 @@ mos_bufmgr_gem_init_xe(int fd, int batch_size)
      dev = &bufmgr_gem->xe_device;
  
      bufmgr_gem->fd = fd;
@@ -375,10 +411,39 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_bufmgr_xe.c b/media_sof
      bufmgr_gem->vm_id = INVALID_VM;
      atomic_set(&bufmgr_gem->ref_count, 1);
  
-diff --color -ruN a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_softlet/linux/common/os/xe/mos_xe_virtio.c
---- a/media_softlet/linux/common/os/xe/mos_xe_virtio.c	1970-01-01 09:00:00.000000000 +0900
-+++ b/media_softlet/linux/common/os/xe/mos_xe_virtio.c	2026-04-02 06:56:57.387150513 +0900
-@@ -0,0 +1,1193 @@
+diff --git a/media_softlet/linux/common/os/xe/mos_synchronization_xe.c b/media_softlet/linux/common/os/xe/mos_synchronization_xe.c
+index 8762de3..3de0151 100644
+--- a/media_softlet/linux/common/os/xe/mos_synchronization_xe.c
++++ b/media_softlet/linux/common/os/xe/mos_synchronization_xe.c
+@@ -34,6 +34,7 @@
+ #include "mos_synchronization_xe.h"
+ #include "mos_utilities.h"
+ #include "mos_bufmgr_util_debug.h"
++#include "mos_xe_virtio.h"
+ 
+ /**
+  * @flags indicates to create opration:
+@@ -339,7 +340,13 @@ int mos_sync_export_external_bo_sync(int fd, int bo_handle, uint32_t flags, int
+     int syncfile_fd = -1;
+     int syncobj_handle = -1;
+     int ret = 0;
+-    ret = drmPrimeHandleToFD(fd, bo_handle, DRM_CLOEXEC | DRM_RDWR, &prime_fd);
++    {
++        struct drm_prime_handle prime_args = {};
++        prime_args.handle = bo_handle;
++        prime_args.flags = DRM_CLOEXEC | DRM_RDWR;
++        ret = mos_xe_ioctl(fd, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime_args);
++        prime_fd = prime_args.fd;
++    }
+     MOS_DRM_CHK_STATUS_MESSAGE_RETURN(ret,
+                 "drmPrimeHandleToFD faled, return error(%d)", ret);
+     syncfile_fd = mos_sync_dmabuf_export_syncfile(prime_fd, flags);
+diff --git a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_softlet/linux/common/os/xe/mos_xe_virtio.c
+new file mode 100644
+index 0000000..f3c3663
+--- /dev/null
++++ b/media_softlet/linux/common/os/xe/mos_xe_virtio.c
+@@ -0,0 +1,1277 @@
 +/*
 + * Copyright 2025 Intel Corporation
 + * SPDX-License-Identifier: MIT
@@ -619,7 +684,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_sof
 +#define VDRM_REQBUF_SZ 0x4000
 +
 +struct vdrm_device {
-+    int fd;
++    int fd;         /* vdrm protocol fd (may be reopened) */
 +
 +    struct vdrm_shmem *shmem;
 +    uint8_t           *rsp_mem;
@@ -766,8 +831,22 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_sof
 +        return NULL;
 +
 +    ret = vdrm_set_context(fd);
-+    if (ret) {
-+        MOS_DRM_ASSERTMESSAGE("vdrm set_context failed: %s", strerror(errno));
++    if (ret && errno == EEXIST) {
++        /* Context already exists on this fd (e.g. mesa/zink).
++         * Reopen to get our own context — needed for shmem mmap.
++         */
++        char path[64];
++        snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
++        int own_fd = open(path, O_RDWR | O_CLOEXEC);
++        if (own_fd < 0)
++            return NULL;
++        ret = vdrm_set_context(own_fd);
++        if (ret) {
++            close(own_fd);
++            return NULL;
++        }
++        fd = own_fd;
++    } else if (ret) {
 +        return NULL;
 +    }
 +
@@ -1268,7 +1347,7 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_sof
 +                memset(&sig, 0, sizeof(sig));
 +                sig.handles       = (uintptr_t)&syncs[i].handle;
 +                sig.count_handles = 1;
-+                drmIoctl(vdev->fd, DRM_IOCTL_SYNCOBJ_SIGNAL, &sig);
++                drmIoctl(g_vdrm_fd, DRM_IOCTL_SYNCOBJ_SIGNAL, &sig);
 +            }
 +        }
 +    }
@@ -1337,16 +1416,72 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_sof
 +
 +    struct drm_xe_sync *xe_syncs =
 +        (struct drm_xe_sync *)(uintptr_t)args->syncs;
-+    bool has_out = false;
++    uint32_t n_in = 0, n_out = 0;
++
 +    for (uint32_t i = 0; i < args->num_syncs; i++) {
-+        if (xe_syncs[i].flags & DRM_XE_SYNC_FLAG_SIGNAL) {
-+            has_out = true;
++        if (xe_syncs[i].flags & DRM_XE_SYNC_FLAG_SIGNAL)
++            n_out++;
++        else
++            n_in++;
++    }
++
++    struct drm_virtgpu_execbuffer_syncobj *in_so = NULL;
++    struct drm_virtgpu_execbuffer_syncobj *out_so = NULL;
++
++    if (n_in) {
++        in_so = (struct drm_virtgpu_execbuffer_syncobj *)
++                calloc(n_in, sizeof(*in_so));
++        if (!in_so)
++            return -ENOMEM;
++    }
++    if (n_out) {
++        out_so = (struct drm_virtgpu_execbuffer_syncobj *)
++                 calloc(n_out, sizeof(*out_so));
++        if (!out_so) {
++            free(in_so);
++            return -ENOMEM;
 +        }
 +    }
 +
-+    /* Flush buffered requests, then submit exec with FENCE_FD_OUT
-+     * so we get a fence fd back from the kernel.
++    uint32_t ii = 0, oi = 0;
++    for (uint32_t i = 0; i < args->num_syncs; i++) {
++        struct drm_xe_sync *s = &xe_syncs[i];
++        if (s->flags & DRM_XE_SYNC_FLAG_SIGNAL) {
++            out_so[oi].handle = s->handle;
++            out_so[oi].flags  = 0;
++            out_so[oi].point  = s->timeline_value;
++            oi++;
++        } else {
++            in_so[ii].handle = s->handle;
++            in_so[ii].flags  = 0;
++            in_so[ii].point  = s->timeline_value;
++            ii++;
++        }
++    }
++
++    /* Submit on ring exec_queue_id + 1 (ring 0 is the control ring).
++     * This ties the virtio fence to the host's drm_timeline for this
++     * exec queue, which signals after actual GPU completion.
++     *
++     * If the fd was reopened (EEXIST), syncobj handles belong to the
++     * caller's fd, not vdev->fd. Use FENCE_FD_OUT to get a fd-portable
++     * fence, then import it into the caller's syncobjs.
 +     */
++    bool reopened = (vdev->fd != g_vdrm_fd);
++
++    if (!reopened) {
++        /* Normal case: syncobjs are on the same fd, pass them directly */
++        int ret = vdrm_execbuf(vdev, &req.hdr, args->exec_queue_id + 1,
++                               in_so, n_in, out_so, n_out);
++        free(in_so);
++        free(out_so);
++        return ret;
++    }
++
++    /* Reopened fd case: use FENCE_FD_OUT + import */
++    free(in_so);
++    free(out_so);
++
 +    pthread_mutex_lock(&vdev->eb_lock);
 +    vdrm_flush_locked(vdev, NULL);
 +
@@ -1354,44 +1489,54 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_sof
 +
 +    struct drm_virtgpu_execbuffer eb;
 +    memset(&eb, 0, sizeof(eb));
-+    eb.flags   = VIRTGPU_EXECBUF_RING_IDX;
-+    eb.size    = sizeof(req);
-+    eb.command = (uintptr_t)&req;
-+    eb.ring_idx = 0;
++    eb.flags    = VIRTGPU_EXECBUF_RING_IDX;
++    eb.size     = sizeof(req);
++    eb.command  = (uintptr_t)&req;
++    eb.ring_idx = args->exec_queue_id + 1;
 +
-+    int fence_fd = -1;
-+    if (has_out)
++    if (n_out)
 +        eb.flags |= VIRTGPU_EXECBUF_FENCE_FD_OUT;
 +
 +    int ret = drmIoctl(vdev->fd, DRM_IOCTL_VIRTGPU_EXECBUFFER, &eb);
-+    if (!ret && has_out)
-+        fence_fd = eb.fence_fd;
++    int fence_fd = (!ret && n_out) ? eb.fence_fd : -1;
 +
 +    pthread_mutex_unlock(&vdev->eb_lock);
 +
-+    if (ret) {
-+        MOS_DRM_ASSERTMESSAGE("VIRTGPU_EXECBUFFER exec failed: %s",
-+                              strerror(errno));
++    if (ret)
 +        return ret;
-+    }
 +
-+    /* Import the fence fd into each out-syncobj so the caller's
-+     * syncobj wait completes when the host finishes the batch.
-+     */
 +    if (fence_fd >= 0) {
++        /* Wait for the GPU fence to signal before advancing timeline
++         * syncobjs. This ensures the GPU has actually completed the
++         * batch before we tell the media driver the surfaces are ready.
++         */
++        struct pollfd pfd = { .fd = fence_fd, .events = POLLIN };
++        while (poll(&pfd, 1, -1) == -1 && errno == EINTR)
++            ;
++        close(fence_fd);
++
++        /* Now signal each out-syncobj at its timeline point. */
 +        for (uint32_t i = 0; i < args->num_syncs; i++) {
 +            struct drm_xe_sync *s = &xe_syncs[i];
 +            if (!(s->flags & DRM_XE_SYNC_FLAG_SIGNAL))
 +                continue;
 +
-+            struct drm_syncobj_handle sh;
-+            memset(&sh, 0, sizeof(sh));
-+            sh.handle = s->handle;
-+            sh.flags  = DRM_SYNCOBJ_FD_TO_HANDLE_FLAGS_IMPORT_SYNC_FILE;
-+            sh.fd     = fence_fd;
-+            drmIoctl(vdev->fd, DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE, &sh);
++            if (s->type == DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ) {
++                struct drm_syncobj_timeline_array tsa;
++                memset(&tsa, 0, sizeof(tsa));
++                tsa.handles = (uintptr_t)&s->handle;
++                tsa.points  = (uintptr_t)&s->timeline_value;
++                tsa.count_handles = 1;
++                drmIoctl(g_vdrm_fd,
++                         DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, &tsa);
++            } else {
++                struct drm_syncobj_array sa;
++                memset(&sa, 0, sizeof(sa));
++                sa.handles = (uintptr_t)&s->handle;
++                sa.count_handles = 1;
++                drmIoctl(g_vdrm_fd, DRM_IOCTL_SYNCOBJ_SIGNAL, &sa);
++            }
 +        }
-+        close(fence_fd);
 +    }
 +
 +    return 0;
@@ -1542,8 +1687,11 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_sof
 +        return handle_gem_close(vdev, (struct drm_gem_close *)arg);
 +
 +    default:
-+        /* SYNCOBJ_*, PRIME_*, etc. -- pass through to kernel */
-+        return drmIoctl(fd, request, arg);
++        /* SYNCOBJ_*, PRIME_*, etc. -- pass through to kernel.
++         * Use vdev->fd since handles/syncobjs live on our context fd
++         * (which may be a reopened fd if EEXIST was encountered).
++         */
++        return drmIoctl(vdev->fd, request, arg);
 +    }
 +}
 +
@@ -1557,7 +1705,8 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_sof
 +    memset(&req, 0, sizeof(req));
 +    req.handle = handle;
 +
-+    int ret = drmIoctl(fd, DRM_IOCTL_VIRTGPU_MAP, &req);
++    int vfd = g_vdrm->fd;
++    int ret = drmIoctl(vfd, DRM_IOCTL_VIRTGPU_MAP, &req);
 +    if (ret) {
 +        MOS_DRM_ASSERTMESSAGE("mos_xe_gem_mmap: VIRTGPU_MAP failed: %s",
 +                              strerror(errno));
@@ -1565,16 +1714,18 @@ diff --color -ruN a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_sof
 +    }
 +
 +    void *map = mmap(NULL, size, PROT_READ | PROT_WRITE,
-+                     MAP_SHARED, fd, req.offset);
++                     MAP_SHARED, vfd, req.offset);
 +    if (map == MAP_FAILED) {
 +        MOS_DRM_ASSERTMESSAGE("mos_xe_gem_mmap: mmap failed: %s",
 +                              strerror(errno));
 +    }
 +    return map;
 +}
-diff --color -ruN a/media_softlet/linux/common/os/xe/mos_xe_virtio.h b/media_softlet/linux/common/os/xe/mos_xe_virtio.h
---- a/media_softlet/linux/common/os/xe/mos_xe_virtio.h	1970-01-01 09:00:00.000000000 +0900
-+++ b/media_softlet/linux/common/os/xe/mos_xe_virtio.h	2026-04-02 05:50:03.420678272 +0900
+diff --git a/media_softlet/linux/common/os/xe/mos_xe_virtio.h b/media_softlet/linux/common/os/xe/mos_xe_virtio.h
+new file mode 100644
+index 0000000..70a32fd
+--- /dev/null
++++ b/media_softlet/linux/common/os/xe/mos_xe_virtio.h
 @@ -0,0 +1,67 @@
 +/*
 + * Copyright 2025 Intel Corporation
