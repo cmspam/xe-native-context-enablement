@@ -1,5 +1,5 @@
 diff --git a/config.h.meson b/config.h.meson
-index 55497ffb..9a26cb59 100644
+index 55497ff..9a26cb5 100644
 --- a/config.h.meson
 +++ b/config.h.meson
 @@ -44,6 +44,7 @@
@@ -11,7 +11,7 @@ index 55497ffb..9a26cb59 100644
  #mesondefine ENABLE_RENDER_SERVER
  #mesondefine ENABLE_RENDER_SERVER_WORKER_PROCESS
 diff --git a/meson.build b/meson.build
-index 8e1c0767..631d008f 100644
+index 8e1c076..631d008 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -129,6 +129,11 @@ if with_drm_i915
@@ -35,7 +35,7 @@ index 8e1c0767..631d008f 100644
          'drm-msm': with_drm_msm,
          'render server worker': with_render_server ? with_render_server_worker : 'none',
 diff --git a/meson_options.txt b/meson_options.txt
-index e7e67d91..a5a44342 100644
+index e7e67d9..a5a4434 100644
 --- a/meson_options.txt
 +++ b/meson_options.txt
 @@ -81,6 +81,7 @@ option(
@@ -47,7 +47,7 @@ index e7e67d91..a5a44342 100644
    description : 'List of drm native-context renderers to build'
  )
 diff --git a/src/drm/drm_renderer.c b/src/drm/drm_renderer.c
-index 3eb33e9b..0b81a183 100644
+index 3eb33e9..0b81a18 100644
 --- a/src/drm/drm_renderer.c
 +++ b/src/drm/drm_renderer.c
 @@ -38,6 +38,10 @@
@@ -79,10 +79,10 @@ index 3eb33e9b..0b81a183 100644
  int
 diff --git a/src/drm/xe/xe_ccmd.c b/src/drm/xe/xe_ccmd.c
 new file mode 100644
-index 00000000..377aa473
+index 0000000..2245719
 --- /dev/null
 +++ b/src/drm/xe/xe_ccmd.c
-@@ -0,0 +1,410 @@
+@@ -0,0 +1,419 @@
 +/*
 + * Copyright 2025 Google LLC
 + * SPDX-License-Identifier: MIT
@@ -179,6 +179,11 @@ index 00000000..377aa473
 +   return 0;
 +}
 +
++/* VM binds are performed synchronously on the host side: we attach a
++ * temporary syncobj, submit the bind, and wait for completion before
++ * returning the result to the guest.  This guarantees that mappings are
++ * visible before any dependent exec submissions.
++ */
 +static int
 +xe_ccmd_vm_bind(struct drm_context *dctx, struct vdrm_ccmd_req *hdr)
 +{
@@ -457,6 +462,10 @@ index 00000000..377aa473
 +         drm_timeline_set_last_fence_fd(&eq->timeline, sh.fd);
 +   }
 +
++   /* Mark the exec queue as banned in shared memory so the guest can
++    * detect GPU hangs.  The mask is a uint64_t, limiting tracking to
++    * the first 64 queue IDs.
++    */
 +   if (rsp->ret == EIO) {
 +      struct xe_shmem *shmem = to_xe_shmem(dctx->shmem);
 +      if (shmem && req->exec_queue_id < 64) {
@@ -495,7 +504,7 @@ index 00000000..377aa473
 +const unsigned int xe_ccmd_dispatch_size = ARRAY_SIZE(xe_ccmd_dispatch);
 diff --git a/src/drm/xe/xe_ccmd.h b/src/drm/xe/xe_ccmd.h
 new file mode 100644
-index 00000000..602ed60e
+index 0000000..602ed60
 --- /dev/null
 +++ b/src/drm/xe/xe_ccmd.h
 @@ -0,0 +1,14 @@
@@ -515,10 +524,10 @@ index 00000000..602ed60e
 +#endif /* XE_RENDERER_CCMD_H_ */
 diff --git a/src/drm/xe/xe_object.c b/src/drm/xe/xe_object.c
 new file mode 100644
-index 00000000..9d1da490
+index 0000000..0a63fd7
 --- /dev/null
 +++ b/src/drm/xe/xe_object.c
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,45 @@
 +/*
 + * Copyright 2025 Google LLC
 + * SPDX-License-Identifier: MIT
@@ -556,14 +565,17 @@ index 00000000..9d1da490
 +void
 +xe_renderer_free_object(struct drm_context *dctx, struct drm_object *dobj)
 +{
-+   struct drm_gem_close close = { .handle = dobj->handle };
++   struct drm_gem_close close = {
++      .handle = dobj->handle,
++   };
 +
 +   drmIoctl(dctx->fd, DRM_IOCTL_GEM_CLOSE, &close);
++
 +   free(dobj);
 +}
 diff --git a/src/drm/xe/xe_object.h b/src/drm/xe/xe_object.h
 new file mode 100644
-index 00000000..6ddcd88f
+index 0000000..6ddcd88
 --- /dev/null
 +++ b/src/drm/xe/xe_object.h
 @@ -0,0 +1,22 @@
@@ -591,10 +603,10 @@ index 00000000..6ddcd88f
 +#endif /* XE_RENDERER_OBJECT_H_ */
 diff --git a/src/drm/xe/xe_proto.h b/src/drm/xe/xe_proto.h
 new file mode 100644
-index 00000000..45faa041
+index 0000000..296de38
 --- /dev/null
 +++ b/src/drm/xe/xe_proto.h
-@@ -0,0 +1,170 @@
+@@ -0,0 +1,173 @@
 +/*
 + * Copyright 2025 Google LLC
 + * SPDX-License-Identifier: MIT
@@ -635,6 +647,9 @@ index 00000000..45faa041
 +      .len = (_len),                                \
 +   }
 +
++/**
++ * Defines the layout of shmem buffer used for host->guest communication.
++ */
 +struct xe_shmem {
 +   struct vdrm_shmem base;
 +   uint64_t banned_exec_queue_mask;
@@ -767,7 +782,7 @@ index 00000000..45faa041
 +#endif /* XE_VIRTIO_PROTO_H_ */
 diff --git a/src/drm/xe/xe_renderer.c b/src/drm/xe/xe_renderer.c
 new file mode 100644
-index 00000000..945213ea
+index 0000000..945213e
 --- /dev/null
 +++ b/src/drm/xe/xe_renderer.c
 @@ -0,0 +1,134 @@
@@ -907,7 +922,7 @@ index 00000000..945213ea
 +}
 diff --git a/src/drm/xe/xe_renderer.h b/src/drm/xe/xe_renderer.h
 new file mode 100644
-index 00000000..5c508ea4
+index 0000000..5c508ea
 --- /dev/null
 +++ b/src/drm/xe/xe_renderer.h
 @@ -0,0 +1,60 @@
@@ -973,10 +988,10 @@ index 00000000..5c508ea4
 +#endif /* XE_RENDERER_H_ */
 diff --git a/src/drm/xe/xe_resource.c b/src/drm/xe/xe_resource.c
 new file mode 100644
-index 00000000..924d34cc
+index 0000000..06f3a6a
 --- /dev/null
 +++ b/src/drm/xe/xe_resource.c
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,163 @@
 +/*
 + * Copyright 2025 Google LLC
 + * SPDX-License-Identifier: MIT
@@ -992,7 +1007,9 @@ index 00000000..924d34cc
 +static int
 +gem_close(int fd, uint32_t handle)
 +{
-+   struct drm_gem_close close_req = { .handle = handle };
++   struct drm_gem_close close_req = {
++      .handle = handle,
++   };
 +   return drmIoctl(fd, DRM_IOCTL_GEM_CLOSE, &close_req);
 +}
 +
@@ -1003,43 +1020,55 @@ index 00000000..924d34cc
 +   struct drm_context *dctx = to_drm_context(vctx);
 +   struct drm_object *dobj = drm_context_get_object_from_res_id(dctx, res->res_id);
 +
-+   if (dobj)
-+      return;
++   if (!dobj) {
++      int fd;
++      enum virgl_resource_fd_type fd_type = virgl_resource_export_fd(res, &fd);
 +
-+   int fd;
-+   enum virgl_resource_fd_type fd_type = virgl_resource_export_fd(res, &fd);
++      /* If importing a dmabuf resource created by another context (or
++       * externally), then import it to create a gem obj handle in our
++       * context:
++       */
++      if (fd_type == VIRGL_RESOURCE_FD_DMABUF) {
++         uint32_t handle;
++         int ret;
 +
-+   if (fd_type == VIRGL_RESOURCE_FD_DMABUF) {
-+      uint32_t handle;
-+      int ret = drmPrimeFDToHandle(dctx->fd, fd, &handle);
-+      if (ret) {
-+         drm_err("Could not import: %s", strerror(errno));
++         ret = drmPrimeFDToHandle(dctx->fd, fd, &handle);
++         if (ret) {
++            drm_err("Could not import: %s", strerror(errno));
++            close(fd);
++            return;
++         }
++
++         /* lseek() to get bo size */
++         off_t size = lseek(fd, 0, SEEK_END);
 +         close(fd);
++         if (size < 0) {
++            drm_err("lseek failed: %" PRId64 " (%s)", size, strerror(errno));
++            gem_close(dctx->fd, handle);
++            return;
++         }
++
++         struct xe_object *obj =
++            xe_object_create(handle, (uint64_t)size, DRM_XE_GEM_CPU_CACHING_WB);
++         if (!obj) {
++            gem_close(dctx->fd, handle);
++            return;
++         }
++
++         dobj = &obj->base;
++
++         drm_context_object_set_res_id(dctx, dobj, res->res_id);
++
++         drm_dbg("obj=%p, res_id=%u, handle=%u", (void *)obj,
++                 dobj->res_id, dobj->handle);
++      } else {
++         if (fd_type != VIRGL_RESOURCE_FD_INVALID) {
++            assert(fd_type == VIRGL_RESOURCE_OPAQUE_HANDLE ||
++                   fd_type == VIRGL_RESOURCE_FD_SHM);
++            close(fd);
++         }
 +         return;
 +      }
-+
-+      off_t size = lseek(fd, 0, SEEK_END);
-+      close(fd);
-+      if (size < 0) {
-+         drm_err("lseek failed: %" PRId64 " (%s)", size, strerror(errno));
-+         gem_close(dctx->fd, handle);
-+         return;
-+      }
-+
-+      struct xe_object *obj =
-+         xe_object_create(handle, (uint64_t)size, DRM_XE_GEM_CPU_CACHING_WB);
-+      if (!obj) {
-+         gem_close(dctx->fd, handle);
-+         return;
-+      }
-+
-+      drm_context_object_set_res_id(dctx, &obj->base, res->res_id);
-+      drm_dbg("obj=%p, res_id=%u, handle=%u", (void *)obj,
-+              obj->base.res_id, obj->base.handle);
-+   } else if (fd_type != VIRGL_RESOURCE_FD_INVALID) {
-+      assert(fd_type == VIRGL_RESOURCE_OPAQUE_HANDLE ||
-+             fd_type == VIRGL_RESOURCE_FD_SHM);
-+      close(fd);
 +   }
 +}
 +
@@ -1080,6 +1109,7 @@ index 00000000..924d34cc
 +      return -EINVAL;
 +   }
 +
++   /* blob_id of zero is reserved for the shmem buffer: */
 +   if (blob_id == 0)
 +      return drm_context_get_shmem_blob(dctx, "xe-shmem",
 +                                        sizeof(struct xe_shmem),
@@ -1091,6 +1121,8 @@ index 00000000..924d34cc
 +   }
 +
 +   struct drm_object *dobj = drm_context_retrieve_object_from_blob_id(dctx, blob_id);
++
++   /* If GEM_CREATE fails, we can end up here without a backing obj: */
 +   if (!dobj) {
 +      drm_err("no object");
 +      return -ENOENT;
@@ -1102,8 +1134,9 @@ index 00000000..924d34cc
 +   }
 +
 +   if (blob_flags & VIRGL_RENDERER_BLOB_FLAG_USE_SHAREABLE) {
-+      int fd;
-+      int ret = drmPrimeHandleToFD(dctx->fd, dobj->handle, DRM_CLOEXEC | DRM_RDWR, &fd);
++      int fd, ret;
++
++      ret = drmPrimeHandleToFD(dctx->fd, dobj->handle, DRM_CLOEXEC | DRM_RDWR, &fd);
 +      if (ret) {
 +         drm_err("export to fd failed");
 +         return -EINVAL;
@@ -1117,13 +1150,14 @@ index 00000000..924d34cc
 +   }
 +
 +   blob->map_info = to_xe_object(dobj)->map_info;
++
 +   drm_context_object_set_res_id(dctx, dobj, res_id);
 +
 +   return 0;
 +}
 diff --git a/src/drm/xe/xe_resource.h b/src/drm/xe/xe_resource.h
 new file mode 100644
-index 00000000..b917e4b1
+index 0000000..b917e4b
 --- /dev/null
 +++ b/src/drm/xe/xe_resource.h
 @@ -0,0 +1,24 @@
@@ -1152,7 +1186,7 @@ index 00000000..b917e4b1
 +
 +#endif /* XE_RENDERER_RESOURCE_H_ */
 diff --git a/src/drm_hw.h b/src/drm_hw.h
-index 549f2ee2..a3a72f89 100644
+index 549f2ee..a3a72f8 100644
 --- a/src/drm_hw.h
 +++ b/src/drm_hw.h
 @@ -33,6 +33,7 @@ struct virgl_renderer_capset_drm {
@@ -1179,7 +1213,7 @@ index 549f2ee2..a3a72f89 100644
  };
  
 diff --git a/src/meson.build b/src/meson.build
-index ed677f38..d9827cd0 100644
+index ed677f3..d9827cd 100644
 --- a/src/meson.build
 +++ b/src/meson.build
 @@ -145,6 +145,18 @@ drm_i915_sources = [
@@ -1213,14 +1247,15 @@ index ed677f38..d9827cd0 100644
     virgl_sources += proxy_sources
  endif
 diff --git a/src/virglrenderer.c b/src/virglrenderer.c
-index 79717fcc..88cd456c 100644
+index 79717fc..746f3e6 100644
 --- a/src/virglrenderer.c
 +++ b/src/virglrenderer.c
-@@ -573,7 +573,7 @@ void virgl_renderer_get_cap_set(uint32_t cap_set, uint32_t *max_ver,
+@@ -573,7 +573,8 @@ void virgl_renderer_get_cap_set(uint32_t cap_set, uint32_t *max_ver,
        *max_size = proxy_get_capset(cap_set, NULL);
        break;
     case VIRTGPU_DRM_CAPSET_DRM:
 -      *max_ver = 0;
++      /* Version 1 adds Xe native context support (new context type + payload). */
 +      *max_ver = 1;
        *max_size = drm_renderer_capset(NULL);
        break;

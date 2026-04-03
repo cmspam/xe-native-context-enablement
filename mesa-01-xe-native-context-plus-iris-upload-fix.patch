@@ -1,55 +1,72 @@
-diff --git a/src/gallium/auxiliary/target-helpers/drm_helper.h b/src/gallium/auxiliary/target-helpers/drm_helper.h
-index XXXXXXX..XXXXXXX 100644
---- a/src/gallium/auxiliary/target-helpers/drm_helper.h
-+++ b/src/gallium/auxiliary/target-helpers/drm_helper.h
-@@ -417,6 +417,7 @@
- #ifdef GALLIUM_ZINK
- #include "zink/zink_public.h"
-
-+#include "virtio/virtio-gpu/drm_hw.h"
- static struct pipe_screen *
- pipe_zink_create_screen(int fd, const struct pipe_screen_config *config)
+diff --git a/src/gallium/drivers/iris/xe/iris_kmd_backend.c b/src/gallium/drivers/iris/xe/iris_kmd_backend.c
+index 3aeb148..70885c2 100644
+--- a/src/gallium/drivers/iris/xe/iris_kmd_backend.c
++++ b/src/gallium/drivers/iris/xe/iris_kmd_backend.c
+@@ -28,6 +28,7 @@
+ #include "common/intel_gem.h"
+ #include "common/xe/intel_gem.h"
+ #include "dev/intel_debug.h"
++#include "dev/virtio/intel_virtio.h"
+ #include "iris/iris_bufmgr.h"
+ #include "iris/iris_batch.h"
+ #include "iris/iris_context.h"
+@@ -101,6 +102,19 @@ xe_gem_create(struct iris_bufmgr *bufmgr,
+    if (alloc_flags & BO_ALLOC_PROTECTED)
+       gem_create.extensions = (uintptr_t)&pxp_ext;
+ 
++   /* On virtio Xe, upload/staging BOs with WB caching cause severe
++    * CPU-write stalls.  Force WC for these specific allocations to
++    * restore streaming upload performance.
++    */
++   if (is_intel_virtio_xe(iris_bufmgr_get_fd(bufmgr)) &&
++       (alloc_flags & (BO_ALLOC_CACHED_COHERENT |
++                       BO_ALLOC_SMEM |
++                       BO_ALLOC_NO_SUBALLOC)) ==
++       (BO_ALLOC_CACHED_COHERENT |
++        BO_ALLOC_SMEM |
++        BO_ALLOC_NO_SUBALLOC))
++      gem_create.cpu_caching = DRM_XE_GEM_CPU_CACHING_WC;
++
+    if (intel_ioctl(iris_bufmgr_get_fd(bufmgr), DRM_IOCTL_XE_GEM_CREATE,
+                    &gem_create))
+       return 0;
+diff --git a/src/gallium/winsys/iris/drm/iris_drm_winsys.c b/src/gallium/winsys/iris/drm/iris_drm_winsys.c
+index 54e9971..517d852 100644
+--- a/src/gallium/winsys/iris/drm/iris_drm_winsys.c
++++ b/src/gallium/winsys/iris/drm/iris_drm_winsys.c
+@@ -48,16 +48,22 @@ bool
+ iris_drm_probe_nctx(int fd, const struct virgl_renderer_capset_drm *caps)
  {
-@@ -425,10 +426,19 @@ pipe_zink_create_screen(int fd, const struct pipe_screen_config *config)
-    return screen ? debug_screen_wrap(screen) : NULL;
- }
-
-+static bool
-+zink_drm_probe_nctx(int fd, const struct virgl_renderer_capset_drm *caps)
-+{
+ #ifdef HAVE_INTEL_VIRTIO
+-   if (caps->context_type != VIRTGPU_DRM_CONTEXT_I915)
++   if (caps->context_type != VIRTGPU_DRM_CONTEXT_I915 &&
++       caps->context_type != VIRTGPU_DRM_CONTEXT_XE)
+       return false;
+ 
+    if (debug_get_bool_option("INTEL_VIRTIO_DISABLE", false))
+       return false;
+ 
+    struct intel_device_info devinfo;
++   uint32_t pci_device_id;
+ 
+-   if (!intel_get_device_info_from_pci_id(caps->u.intel.pci_device_id,
+-                                          &devinfo))
 +   if (caps->context_type == VIRTGPU_DRM_CONTEXT_XE)
-+      return true;
++      pci_device_id = caps->u.xe.pci_device_id;
++   else
++      pci_device_id = caps->u.intel.pci_device_id;
 +
-+   return false;
-+}
-+
- const driOptionDescription zink_driconf[] = {
-       #include "zink/driinfo_zink.h"
- };
--DRM_DRIVER_DESCRIPTOR(zink, zink_driconf, ARRAY_SIZE(zink_driconf))
-+DRM_DRIVER_DESCRIPTOR(zink, zink_driconf, ARRAY_SIZE(zink_driconf), .probe_nctx = zink_drm_probe_nctx)
-
- #else
- DRM_DRIVER_DESCRIPTOR_STUB(zink)
-diff --git a/src/gallium/drivers/zink/zink_screen.c b/src/gallium/drivers/zink/zink_screen.c
-index XXXXXXX..XXXXXXX 100644
---- a/src/gallium/drivers/zink/zink_screen.c
-+++ b/src/gallium/drivers/zink/zink_screen.c
-@@ -3099,6 +3099,7 @@
-    /* these drivers can successfully do INVALID <-> LINEAR dri3 modifier swap */
-    switch (zink_driverid(screen)) {
-    case VK_DRIVER_ID_IMAGINATION_OPEN_SOURCE_MESA:
-+   case VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA:
-    case VK_DRIVER_ID_MESA_TURNIP:
-    case VK_DRIVER_ID_MESA_NVK:
-    case VK_DRIVER_ID_MESA_LLVMPIPE:
++   if (!intel_get_device_info_from_pci_id(pci_device_id, &devinfo))
+       return false;
+ 
+    if (devinfo.ver < 8 || devinfo.platform == INTEL_PLATFORM_CHV)
 diff --git a/src/intel/dev/intel_kmd.c b/src/intel/dev/intel_kmd.c
-index 84cd676462a..4c4fd89e77c 100644
+index 84cd676..4c4fd89 100644
 --- a/src/intel/dev/intel_kmd.c
 +++ b/src/intel/dev/intel_kmd.c
 @@ -38,13 +38,15 @@ intel_get_kmd_type(int fd)
        return type;
-
+ 
     /*
 -    * For virtio, version->name would be either "virtio_gpu" or "i915",
 +    * For virtio, version->name would be either "virtio_gpu" or "i915"/"xe",
@@ -62,11 +79,11 @@ index 84cd676462a..4c4fd89e77c 100644
        type = INTEL_KMD_TYPE_XE;
 +   else if (is_intel_virtio_fd(fd))
 +      type = is_intel_virtio_xe(fd) ? INTEL_KMD_TYPE_XE : INTEL_KMD_TYPE_I915;
-
+ 
     drmFreeVersion(version);
-
+ 
 diff --git a/src/intel/dev/meson.build b/src/intel/dev/meson.build
-index 5085af1b8ef..beaa44df06c 100644
+index 5085af1..beaa44d 100644
 --- a/src/intel/dev/meson.build
 +++ b/src/intel/dev/meson.build
 @@ -27,6 +27,7 @@ files_libintel_dev += files(
@@ -75,16 +92,16 @@ index 5085af1b8ef..beaa44df06c 100644
    'virtio/i915_virtio_ccmd_execbuf.c',
 +  'virtio/xe_virtio_ccmd.c',
  )
-
+ 
  inc_intel_dev_virtio += [
 diff --git a/src/intel/dev/virtio/i915_virtio_ccmd.c b/src/intel/dev/virtio/i915_virtio_ccmd.c
-index bfc8cc5f572..10cdec72d35 100644
+index bfc8cc5..b74da71 100644
 --- a/src/intel/dev/virtio/i915_virtio_ccmd.c
 +++ b/src/intel/dev/virtio/i915_virtio_ccmd.c
-@@ -705,6 +705,69 @@ intel_virtio_ioctl(int fd, unsigned long cmd, void *req)
-
+@@ -705,6 +705,72 @@ intel_virtio_ioctl(int fd, unsigned long cmd, void *req)
+ 
     int orig_errno = errno;
-
+ 
 +#define IOC_MASKED_XE(IOC) ((IOC) & ~IOCSIZE_MASK)
 +
 +   if (dev->is_xe) {
@@ -134,6 +151,9 @@ index bfc8cc5f572..10cdec72d35 100644
 +         errno = xe_virtio_exec(dev, req);
 +         goto out;
 +      case IOC_MASKED_XE(DRM_IOCTL_XE_WAIT_USER_FENCE):
++         /* No-op: synchronization is handled by syncobj/timeline flow
++          * through vdrm exec submission, not local user-fence waits.
++          */
 +         errno = 0;
 +         goto out;
 +      case IOC_MASKED_XE(DRM_IOCTL_XE_GEM_MMAP_OFFSET):
@@ -152,7 +172,7 @@ index bfc8cc5f572..10cdec72d35 100644
      * Special case for legacy ioctls that have same NR as extended ioctl
      * and need to be handled differently.
 diff --git a/src/intel/dev/virtio/intel_virtio.h b/src/intel/dev/virtio/intel_virtio.h
-index 43866efd0a6..197f3c44d6a 100644
+index 43866ef..197f3c4 100644
 --- a/src/intel/dev/virtio/intel_virtio.h
 +++ b/src/intel/dev/virtio/intel_virtio.h
 @@ -20,6 +20,7 @@ void intel_virtio_unref_fd(int fd);
@@ -166,7 +186,7 @@ index 43866efd0a6..197f3c44d6a 100644
 @@ -43,6 +44,11 @@ static inline bool is_intel_virtio_fd(int fd)
     return false;
  }
-
+ 
 +static inline bool is_intel_virtio_xe(int fd)
 +{
 +   return false;
@@ -176,13 +196,13 @@ index 43866efd0a6..197f3c44d6a 100644
  intel_virtio_bo_mmap(int fd, uint32_t handle, size_t size, void *placed_addr)
  {
 diff --git a/src/intel/dev/virtio/intel_virtio_device.c b/src/intel/dev/virtio/intel_virtio_device.c
-index 07dda2a93ec..b8c6285da7e 100644
+index 07dda2a..b8c6285 100644
 --- a/src/intel/dev/virtio/intel_virtio_device.c
 +++ b/src/intel/dev/virtio/intel_virtio_device.c
 @@ -43,6 +43,13 @@ bool is_intel_virtio_fd(int fd)
     return fd_to_intel_virtio_device(fd) != NULL;
  }
-
+ 
 +bool
 +is_intel_virtio_xe(int fd)
 +{
@@ -194,9 +214,9 @@ index 07dda2a93ec..b8c6285da7e 100644
  intel_virtio_get_pci_device_info(int fd, struct intel_device_info *devinfo)
  {
 @@ -54,12 +61,21 @@ intel_virtio_get_pci_device_info(int fd, struct intel_device_info *devinfo)
-
+ 
     caps = dev->vdrm->caps;
-
+ 
 -   devinfo->pci_bus = caps.u.intel.pci_bus;
 -   devinfo->pci_dev = caps.u.intel.pci_dev;
 -   devinfo->pci_func = caps.u.intel.pci_func;
@@ -218,7 +238,7 @@ index 07dda2a93ec..b8c6285da7e 100644
 +      devinfo->pci_device_id = caps.u.intel.pci_device_id;
 +      devinfo->pci_revision_id = caps.u.intel.pci_revision_id;
 +   }
-
+ 
     return true;
  }
 @@ -103,7 +119,11 @@ int intel_virtio_init_fd(int fd)
@@ -232,32 +252,32 @@ index 07dda2a93ec..b8c6285da7e 100644
 +      else
 +         dev->vdrm = vdrm_device_connect(fd, VIRTGPU_DRM_CONTEXT_I915);
     }
-
+ 
     if (!dev->vdrm) {
 diff --git a/src/intel/dev/virtio/intel_virtio_priv.h b/src/intel/dev/virtio/intel_virtio_priv.h
-index f520beb8a8a..b3d836222ef 100644
+index f520beb..b3d8362 100644
 --- a/src/intel/dev/virtio/intel_virtio_priv.h
 +++ b/src/intel/dev/virtio/intel_virtio_priv.h
 @@ -18,6 +18,7 @@
-
+ 
  #include "drm-uapi/drm.h"
  #include "drm-uapi/i915_drm.h"
 +#include <drm/xe_drm.h>
  #include "drm-uapi/virtgpu_drm.h"
  #include <xf86drm.h>
-
+ 
 @@ -57,6 +58,7 @@ struct intel_virtio_device {
     uint32_t refcnt;
-
+ 
     bool vpipe;
 +   bool is_xe;
  };
-
+ 
  struct intel_virtio_device *fd_to_intel_virtio_device(int fd);
 @@ -64,4 +66,27 @@ struct intel_virtio_device *fd_to_intel_virtio_device(int fd);
  int i915_virtio_gem_execbuffer2(struct intel_virtio_device *dev,
                                  struct drm_i915_gem_execbuffer2 *exec);
-
+ 
 +int xe_virtio_device_query(struct intel_virtio_device *dev,
 +                           struct drm_xe_device_query *args);
 +int xe_virtio_gem_create(struct intel_virtio_device *dev,
@@ -284,10 +304,10 @@ index f520beb8a8a..b3d836222ef 100644
  #endif /* INTEL_VIRTIO_PRIV_H_ */
 diff --git a/src/intel/dev/virtio/xe_virtio_ccmd.c b/src/intel/dev/virtio/xe_virtio_ccmd.c
 new file mode 100644
-index 00000000000..1aceb51ccff
+index 0000000..0879945
 --- /dev/null
 +++ b/src/intel/dev/virtio/xe_virtio_ccmd.c
-@@ -0,0 +1,307 @@
+@@ -0,0 +1,304 @@
 +/*
 + * Copyright 2025 Collabora, Ltd.
 + * SPDX-License-Identifier: MIT
@@ -505,7 +525,7 @@ index 00000000000..1aceb51ccff
 +   uint32_t n_in = 0;
 +   uint32_t n_out = 0;
 +   struct drm_virtgpu_execbuffer_syncobj *in_so = NULL;
-+    struct drm_virtgpu_execbuffer_syncobj *out_so = NULL;
++   struct drm_virtgpu_execbuffer_syncobj *out_so = NULL;
 +   struct xe_ccmd_exec_req ccmd_req = {
 +      .hdr = XE_CCMD(EXEC, sizeof(ccmd_req)),
 +      .exec_queue_id = args->exec_queue_id,
@@ -546,9 +566,6 @@ index 00000000000..1aceb51ccff
 +         s++;
 +         continue;
 +      }
-+
-+      if (xe_syncs[i].flags & DRM_XE_SYNC_FLAG_SIGNAL)
-+         continue;
 +
 +      in_so[w].handle = xe_syncs[i].handle;
 +      if (xe_syncs[i].type == DRM_XE_SYNC_TYPE_TIMELINE_SYNCOBJ)
@@ -597,7 +614,7 @@ index 00000000000..1aceb51ccff
 +}
 diff --git a/src/intel/dev/virtio/xe_virtio_proto.h b/src/intel/dev/virtio/xe_virtio_proto.h
 new file mode 100644
-index 00000000000..676ce2df278
+index 0000000..676ce2d
 --- /dev/null
 +++ b/src/intel/dev/virtio/xe_virtio_proto.h
 @@ -0,0 +1,175 @@
@@ -777,24 +794,24 @@ index 00000000000..676ce2df278
 +
 +#endif /* XE_VIRTIO_PROTO_H_ */
 diff --git a/src/intel/dev/xe/intel_device_info.c b/src/intel/dev/xe/intel_device_info.c
-index b026b361cbc..7de7c65fd0b 100644
+index b026b36..7de7c65 100644
 --- a/src/intel/dev/xe/intel_device_info.c
 +++ b/src/intel/dev/xe/intel_device_info.c
 @@ -28,8 +28,10 @@
  #include "dev/intel_hwconfig.h"
-
+ 
  #include "util/log.h"
 +#include "util/os_memory.h"
-
+ 
  #include "drm-uapi/xe_drm.h"
 +#include "xf86drm.h"
-
+ 
  static inline bool
  has_gmd_ip_version(const struct intel_device_info *devinfo)
 @@ -37,6 +39,33 @@ has_gmd_ip_version(const struct intel_device_info *devinfo)
     return devinfo->verx10 >= 200;
  }
-
+ 
 +static bool
 +xe_is_virtio_fd(int fd)
 +{
@@ -826,7 +843,7 @@ index b026b361cbc..7de7c65fd0b 100644
  xe_query_alloc_fetch(int fd, uint32_t query_id, int32_t *len)
  {
 @@ -103,17 +132,21 @@ intel_device_info_xe_query_regions(int fd, struct intel_device_info *devinfo,
-
+ 
        switch (region->mem_class) {
        case DRM_XE_MEM_REGION_CLASS_SYSMEM: {
 +         const uint64_t sysmem_size =
@@ -851,7 +868,7 @@ index b026b361cbc..7de7c65fd0b 100644
        }
        case DRM_XE_MEM_REGION_CLASS_VRAM: {
 diff --git a/src/virtio/virtio-gpu/drm_hw.h b/src/virtio/virtio-gpu/drm_hw.h
-index 9f7244c5a41..4774ab8827c 100644
+index 9f7244c..4774ab8 100644
 --- a/src/virtio/virtio-gpu/drm_hw.h
 +++ b/src/virtio/virtio-gpu/drm_hw.h
 @@ -31,6 +31,7 @@ struct virgl_renderer_capset_drm {
@@ -876,4 +893,4 @@ index 9f7244c5a41..4774ab8827c 100644
 +      } xe;  /* context_type == VIRTGPU_DRM_CONTEXT_XE */
     } u;
  };
-
+ 
