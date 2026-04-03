@@ -1,32 +1,5 @@
-diff --git a/media_driver/media_top_cmake.cmake b/media_driver/media_top_cmake.cmake
-index 9d1c9b4..d7a0a3c 100755
---- a/media_driver/media_top_cmake.cmake
-+++ b/media_driver/media_top_cmake.cmake
-@@ -605,14 +605,14 @@ set_target_properties(${LIB_NAME_STATIC} PROPERTIES OUTPUT_NAME ${LIB_NAME})
- 
- option(MEDIA_BUILD_FATAL_WARNINGS "Turn compiler warnings into fatal errors" ON)
- if(MEDIA_BUILD_FATAL_WARNINGS)
--    set_target_properties(${LIB_NAME}_COMMON PROPERTIES COMPILE_FLAGS "-Werror")
--    set_target_properties(${LIB_NAME}_CODEC PROPERTIES COMPILE_FLAGS "-Werror")
--    set_target_properties(${LIB_NAME}_VP PROPERTIES COMPILE_FLAGS "-Werror")
--    set_target_properties(${LIB_NAME}_CP PROPERTIES COMPILE_FLAGS "-Werror")
--    set_target_properties(${LIB_NAME}_mos PROPERTIES COMPILE_FLAGS "-Werror")
--    set_target_properties(${LIB_NAME}_SOFTLET_VP PROPERTIES COMPILE_FLAGS "-Werror")
--    set_target_properties(${LIB_NAME}_SOFTLET_CODEC PROPERTIES COMPILE_FLAGS "-Werror")
--    set_target_properties(${LIB_NAME}_SOFTLET_COMMON PROPERTIES COMPILE_FLAGS "-Werror")
-+    set_target_properties(${LIB_NAME}_COMMON PROPERTIES COMPILE_FLAGS "-Wno-error")
-+    set_target_properties(${LIB_NAME}_CODEC PROPERTIES COMPILE_FLAGS "-Wno-error")
-+    set_target_properties(${LIB_NAME}_VP PROPERTIES COMPILE_FLAGS "-Wno-error")
-+    set_target_properties(${LIB_NAME}_CP PROPERTIES COMPILE_FLAGS "-Wno-error")
-+    set_target_properties(${LIB_NAME}_mos PROPERTIES COMPILE_FLAGS "-Wno-error")
-+    set_target_properties(${LIB_NAME}_SOFTLET_VP PROPERTIES COMPILE_FLAGS "-Wno-error")
-+    set_target_properties(${LIB_NAME}_SOFTLET_CODEC PROPERTIES COMPILE_FLAGS "-Wno-error")
-+    set_target_properties(${LIB_NAME}_SOFTLET_COMMON PROPERTIES COMPILE_FLAGS "-Wno-error")
- endif()
- 
- set(MEDIA_LINK_FLAGS "-Wl,--no-as-needed -Wl,--gc-sections -z relro -z now -fPIC")
 diff --git a/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h b/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h
-index 4e67df8..b10acbd 100644
+index 4e67df8..27f1b05 100644
 --- a/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h
 +++ b/media_softlet/linux/common/os/i915/include/mos_bufmgr_api.h
 @@ -419,14 +419,16 @@ extern "C" {
@@ -40,7 +13,7 @@ index 4e67df8..b10acbd 100644
      int device_type = DEVICE_TYPE_COUNT;
      drm_version_t version;
 -    char name[5] = "";
-+    char name[16] = "";
++    char name[16] = "";  /* sized for "virtio_gpu" (10 chars + nul) */
  
      memset(&version, 0, sizeof(version));
 -    version.name_len = 4;
@@ -52,7 +25,7 @@ index 4e67df8..b10acbd 100644
      {
          device_type = DEVICE_TYPE_XE;
      }
-+    else if(strcmp("virtio_gpu", name) == 0 && mos_xe_virtio_probe(fd))
++    else if (strcmp("virtio_gpu", name) == 0 && mos_xe_virtio_probe(fd))
 +    {
 +        device_type = DEVICE_TYPE_XE;
 +    }
@@ -440,10 +413,10 @@ index 8762de3..3de0151 100644
      syncfile_fd = mos_sync_dmabuf_export_syncfile(prime_fd, flags);
 diff --git a/media_softlet/linux/common/os/xe/mos_xe_virtio.c b/media_softlet/linux/common/os/xe/mos_xe_virtio.c
 new file mode 100644
-index 0000000..f3c3663
+index 0000000..7b7b984
 --- /dev/null
 +++ b/media_softlet/linux/common/os/xe/mos_xe_virtio.c
-@@ -0,0 +1,1277 @@
+@@ -0,0 +1,1285 @@
 +/*
 + * Copyright 2025 Intel Corporation
 + * SPDX-License-Identifier: MIT
@@ -706,7 +679,10 @@ index 0000000..f3c3663
 +    struct virgl_renderer_capset_drm caps;
 +};
 +
-+/* We support a single fd at a time (the media driver opens one device). */
++/* Single-instance design: only one active vdrm connection at a time.
++ * This matches the media driver's usage model (one device context per
++ * process).  Multi-device support would require per-fd state tracking.
++ */
 +static struct vdrm_device *g_vdrm = NULL;
 +static int g_vdrm_fd = -1;
 +static pthread_mutex_t g_vdrm_global_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1478,7 +1454,12 @@ index 0000000..f3c3663
 +        return ret;
 +    }
 +
-+    /* Reopened fd case: use FENCE_FD_OUT + import */
++    /* Reopened fd case: syncobj handles belong to the caller's fd, not
++     * vdev->fd, so we cannot pass them directly.  Instead, use
++     * FENCE_FD_OUT, wait for GPU completion, then signal the caller's
++     * syncobjs.  This blocks the submission thread but preserves
++     * timeline ordering correctness.
++     */
 +    free(in_so);
 +    free(out_so);
 +
