@@ -12,10 +12,19 @@ These patches extend native context support to the **Intel Xe kernel driver**, w
 
 **Functional and tested.** OpenGL (via iris/Gallium), Vulkan (via ANV), and VA-API (hardware video acceleration) are all working.
 
-- **Tested hardware:** Intel Arc B390 (iGPU on Core X7 358H / Panther Lake)
+- **Tested hardware:**
+  - Intel Arc B390 (iGPU on Core X7 358H / Panther Lake) -- original development platform
+  - 13th Gen Intel Core i7-13700H with Intel Iris Xe Graphics -- confirmed working unmodified ([test report](https://github.com/cmspam/xe-native-context-enablement/issues/1), Unigine Heaven: 2928 native-context vs 1557 virgl translation)
 - **Testers welcome** for other Xe-based Intel GPUs (Arc A-series, Meteor Lake, Arrow Lake, Battlemage, etc.) -- please open an issue with your results.
 
 Performance varies by workload and rendering path. Some paths work very well; others may show overhead compared to bare metal. This is experimental.
+
+## Quick start
+
+If you'd rather not build from source:
+
+- **Arch / CachyOS:** prebuilt x86-64-v3 pacman repositories are published at [cmspam/xe-virt-repo](https://github.com/cmspam/xe-virt-repo). Add `[xe-virt-host-v3]` on the host for patched virglrenderer, and `[xe-virt-guest-v3]` in the guest for patched mesa, lib32-mesa, and intel-media-driver. The repos rebuild automatically as new Arch packaging tags land. See that repo's README for the pacman.conf snippets.
+- **NixOS:** [issue #1](https://github.com/cmspam/xe-native-context-enablement/issues/1) contains a self-contained `flake.nix` from an external tester that overlays all three patches, builds a runnable guest VM, and exposes `runVM-native` and `runVM-virgl` apps for side-by-side comparison.
 
 ## Patches
 
