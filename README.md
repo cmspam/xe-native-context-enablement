@@ -26,6 +26,14 @@ If you'd rather not build from source:
 - **Arch / CachyOS:** prebuilt x86-64-v3 pacman repositories are published at [cmspam/xe-virt-repo](https://github.com/cmspam/xe-virt-repo). Add `[xe-virt-host-v3]` on the host for patched virglrenderer, and `[xe-virt-guest-v3]` in the guest for patched mesa, lib32-mesa, and intel-media-driver. The repos rebuild automatically as new Arch packaging tags land. See that repo's README for the pacman.conf snippets.
 - **NixOS:** [issue #1](https://github.com/cmspam/xe-native-context-enablement/issues/1) contains a self-contained `flake.nix` from an external tester that overlays all three patches, builds a runnable guest VM, and exposes `runVM-native` and `runVM-virgl` apps for side-by-side comparison.
 
+## Upstreaming (help wanted)
+
+These patches are not yet upstream in virglrenderer or Mesa, and I'd like them to be. I've opened [virglrenderer issue #662](https://gitlab.freedesktop.org/virgl/virglrenderer/-/issues/662) asking for someone with the time and experience submitting changes to virglrenderer / Mesa to lead the upstreaming effort, but nobody has picked it up yet.
+
+I'm not a regular contributor to these projects and currently lack the bandwidth to navigate the full Merge Request and revision process for a component this critical. I also relied on AI assistance to fill some of my knowledge gaps during development; the result is functional and I kept it as close to the i915 implementation as I could, but it would benefit from review by someone more familiar with the internal architecture of virglrenderer / Mesa.
+
+If you have the experience and time to take this on, please consider this an open invitation. I'm happy to answer questions about the design decisions, but I'd be thrilled if an experienced contributor felt comfortable leading the upstreaming. New Intel hardware no longer supports i915, so getting Xe `drm_native_context` upstream matters for everyone running virtio-gpu going forward.
+
 ## Patches
 
 | Patch | Apply To | Where |
