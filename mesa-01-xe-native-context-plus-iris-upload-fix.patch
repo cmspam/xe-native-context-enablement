@@ -307,7 +307,7 @@ new file mode 100644
 index 0000000..0879945
 --- /dev/null
 +++ b/src/intel/dev/virtio/xe_virtio_ccmd.c
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,313 @@
 +/*
 + * Copyright 2025 Collabora, Ltd.
 + * SPDX-License-Identifier: MIT
@@ -359,7 +359,16 @@ index 0000000..0879945
 +      blob_flags |= VIRTGPU_BLOB_FLAG_USE_CROSS_DEVICE;
 +
 +   req.blob_id = p_atomic_inc_return(&dev->next_blob_id);
++   /* Mesa 26.2 added a blob_hints argument to vdrm_bo_create().  The uapi
++    * define lands in the same header at the same time, so it doubles as the
++    * feature test for the older five argument form.
++    */
++#ifdef DRM_VIRTGPU_BLOB_FLAG_HINT_DEFER_MAPPING
++   ret = vdrm_bo_create(dev->vdrm, args->size, blob_flags, req.blob_id, 0,
++                        &req.hdr);
++#else
 +   ret = vdrm_bo_create(dev->vdrm, args->size, blob_flags, req.blob_id, &req.hdr);
++#endif
 +   if (!ret)
 +      return EINVAL;
 +
