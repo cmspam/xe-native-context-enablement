@@ -40,6 +40,7 @@ If you have the experience and time to take this on, please consider this an ope
 |-------|----------|-------|
 | `virglrenderer-xe-native-context.patch` | [virglrenderer](https://gitlab.freedesktop.org/virgl/virglrenderer) | **Host** |
 | `mesa-01-xe-native-context-plus-iris-upload-fix.patch` | [Mesa](https://gitlab.freedesktop.org/mesa/mesa) | **Guest** |
+| `mesa-02-iris-fix-double-vma-free-on-bind-failure.patch` | [Mesa](https://gitlab.freedesktop.org/mesa/mesa) | **Guest** (only if `mesa-01` was already applied before this fix) |
 | `intel-media-driver-xe-native-context.patch` | [intel-media-driver](https://github.com/intel/media-driver) | **Guest** (only needed for VA-API) |
 
 ### virglrenderer (host)
@@ -49,6 +50,8 @@ Adds an Xe renderer backend to virglrenderer. This is the host-side component th
 ### Mesa (guest)
 
 Adds Xe virtio ccmd support to Mesa's shared Intel device/virtio layer. This plumbing is used by both the iris Gallium driver (OpenGL) and ANV (Vulkan) to issue Xe ioctls over the vdrm protocol instead of talking to a real kernel driver. Also includes a targeted fix for upload buffer caching on virtio Xe (forces WC for staging BOs that exhibit CPU-write stalls under WB caching).
+
+`mesa-01` also includes an iris fix for a double VMA free when `gem_vm_bind()` fails. On that failure iris freed the GPU virtual address and then `bo_close()` freed it again, so a later allocation could hand the same address to a second buffer. On Xe the second `VM_BIND` replaces the first mapping. KWin hits this on udmabuf imports under native context, which corrupted the desktop ([issue #5](https://github.com/cmspam/xe-native-context-enablement/issues/5)). Those error paths now leave the VMA to `bo_close()`, which frees it once and still unbinds.
 
 The Mesa patch must be applied on **guest** (where the actual GPU drivers run) but it's also important to have a recent version of Mesa on the **host**.
 
@@ -68,6 +71,10 @@ git apply virglrenderer-xe-native-context.patch
 # Mesa (guest and host)
 cd mesa
 git apply mesa-01-xe-native-context-plus-iris-upload-fix.patch
+
+# If this tree already has the older mesa-01 applied, apply the iris
+# fix on top instead of applying the new mesa-01 again:
+# git apply mesa-02-iris-fix-double-vma-free-on-bind-failure.patch
 
 # intel-media-driver (guest, only for VA-API)
 cd media-driver

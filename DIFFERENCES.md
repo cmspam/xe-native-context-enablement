@@ -2,7 +2,7 @@
 
 A technical reference for the Xe `drm_native_context` patches: what each change
 does, and why it differs from the existing i915 native-context implementation.
-It covers the three patches in this repository: the virglrenderer host backend,
+It covers the patches in this repository: the virglrenderer host backend,
 the Mesa guest layer, and the intel-media-driver guest shim.
 
 ## Background
@@ -186,12 +186,36 @@ upload/staging BOs with WB caching cause severe CPU-write stalls, and WC restore
 streaming upload performance. It is gated on `is_intel_virtio_xe`, so bare-metal Xe
 keeps its normal choice. This is the change named in the patch filename.
 
-### 3.8 ANV (Vulkan)
+### 3.8 iris VMA free on a failed VM_BIND (`iris_bufmgr.c`)
+
+`iris_bo_alloc()`, `iris_bo_gem_create_from_name()`, `iris_bo_import_dmabuf()`, and
+`intel_aux_map_buffer_alloc()` called `vma_free()` when `gem_vm_bind()` failed, then
+fell through to `bo_free()`. `bo_free()` reaches `bo_close()`, which still sees a
+non-zero `bo->address`, unbinds, and calls `vma_free()` on the same range again.
+`util_vma_heap_free()` does not reject that second free in release builds: the range
+is recorded as a new hole overlapping the hole it was already merged into, and a
+later allocation can hand that GPU address to a second BO. On Xe the second
+`VM_BIND` replaces the first mapping, so textures sample another buffer's memory.
+
+Virtio native context hits this in ordinary desktop use. Importing a guest-memory
+dma-buf (the udmabuf KWin creates for `wl_shm` client buffers) fails at `VM_BIND`
+on the host, and the double free corrupts the desktop. Reported on an Arc Pro B50
+with KDE Plasma in issue #5.
+
+Those error paths now go straight to `bo_free()`. `bo_close()` releases the VMA
+once, and its unbind still runs, which moves the Xe bind timeline past the point
+used by the failed bind. The change is in shared iris code, so it applies to i915
+and to bare metal as well. It is included at the end of
+`mesa-01-xe-native-context-plus-iris-upload-fix.patch`. The same diff is also
+`mesa-02-iris-fix-double-vma-free-on-bind-failure.patch`, for a tree that already
+has the older `mesa-01` applied.
+
+### 3.9 ANV (Vulkan)
 
 Intel KMD ioctls funnel through `intel_ioctl` into `intel_virtio_ioctl`, so ANV
 uses the same Xe dispatch and handlers as iris through the shared virtio layer. The
-two iris-specific changes in this patch are the winsys probe (3.3) and the
-upload-buffer caching (3.7); there is no ANV-specific code.
+iris-specific changes in this patch are the winsys probe (3.3), the upload-buffer
+caching (3.7), and the VMA-free fix (3.8). There is no ANV-specific code.
 
 ## 4. intel-media-driver guest shim (`mos_xe_virtio.c/.h`)
 
