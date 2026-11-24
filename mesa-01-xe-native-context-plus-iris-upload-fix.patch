@@ -1,5 +1,89 @@
+diff --git a/src/gallium/drivers/iris/iris_bufmgr.c b/src/gallium/drivers/iris/iris_bufmgr.c
+index 7e738bb..76add27 100644
+--- a/src/gallium/drivers/iris/iris_bufmgr.c
++++ b/src/gallium/drivers/iris/iris_bufmgr.c
+@@ -1328,7 +1328,7 @@ iris_bo_alloc(struct iris_bufmgr *bufmgr,
+          goto err_free;
+ 
+       if (!bufmgr->kmd_backend->gem_vm_bind(bo, flags))
+-         goto err_vm_alloc;
++         goto err_free;
+    }
+ 
+    bo->name = name;
+@@ -1356,10 +1356,6 @@ iris_bo_alloc(struct iris_bufmgr *bufmgr,
+ 
+    return bo;
+ 
+-err_vm_alloc:
+-   simple_mtx_lock(&bufmgr->lock);
+-   vma_free(bufmgr, bo->address, bo->size);
+-   simple_mtx_unlock(&bufmgr->lock);
+ err_free:
+    simple_mtx_lock(&bufmgr->lock);
+    bo_free(bo);
+@@ -1532,10 +1528,10 @@ iris_bo_gem_create_from_name(struct iris_bufmgr *bufmgr,
+       goto err_free;
+ 
+    if (!iris_bo_set_prime_fd(bo))
+-      goto err_vm_alloc;
++      goto err_free;
+ 
+    if (!bufmgr->kmd_backend->gem_vm_bind(bo, flags))
+-      goto err_vm_alloc;
++      goto err_free;
+ 
+    _mesa_hash_table_insert(bufmgr->handle_table, &bo->gem_handle, bo);
+    _mesa_hash_table_insert(bufmgr->name_table, &bo->real.global_name, bo);
+@@ -1546,10 +1542,6 @@ out:
+    simple_mtx_unlock(&bufmgr->lock);
+    return bo;
+ 
+-err_vm_alloc:
+-   vma_free(bufmgr, bo->address, bo->size);
+-   /* clear bo->address to prevent double free in bo_close() */
+-   bo->address = 0;
+ err_free:
+    bo_free(bo);
+    simple_mtx_unlock(&bufmgr->lock);
+@@ -2102,7 +2094,7 @@ iris_bo_import_dmabuf(struct iris_bufmgr *bufmgr, int prime_fd,
+       goto err_free;
+ 
+    if (!bufmgr->kmd_backend->gem_vm_bind(bo, flags))
+-      goto err_vm_alloc;
++      goto err_free;
+ 
+    _mesa_hash_table_insert(bufmgr->handle_table, &bo->gem_handle, bo);
+ 
+@@ -2118,8 +2110,6 @@ out:
+ 
+    return bo;
+ 
+-err_vm_alloc:
+-   vma_free(bufmgr, bo->address, bo->size);
+ err_free:
+    bo_free(bo);
+    simple_mtx_unlock(&bufmgr->lock);
+@@ -2363,7 +2353,7 @@ intel_aux_map_buffer_alloc(void *driver_ctx, uint32_t size)
+       goto err_free;
+ 
+    if (!bufmgr->kmd_backend->gem_vm_bind(bo, 0))
+-      goto err_vm_alloc;
++      goto err_free;
+ 
+    simple_mtx_unlock(&bufmgr->lock);
+ 
+@@ -2379,8 +2369,6 @@ intel_aux_map_buffer_alloc(void *driver_ctx, uint32_t size)
+    buf->map = iris_bo_map(NULL, bo, MAP_WRITE | MAP_RAW);
+    return buf;
+ 
+-err_vm_alloc:
+-   vma_free(bufmgr, bo->address, bo->size);
+ err_free:
+    free(buf);
+    bo_free(bo);
 diff --git a/src/gallium/drivers/iris/xe/iris_kmd_backend.c b/src/gallium/drivers/iris/xe/iris_kmd_backend.c
-index 3aeb148..70885c2 100644
+index d84e68a..06ca7f1 100644
 --- a/src/gallium/drivers/iris/xe/iris_kmd_backend.c
 +++ b/src/gallium/drivers/iris/xe/iris_kmd_backend.c
 @@ -28,6 +28,7 @@
@@ -10,7 +94,7 @@ index 3aeb148..70885c2 100644
  #include "iris/iris_bufmgr.h"
  #include "iris/iris_batch.h"
  #include "iris/iris_context.h"
-@@ -101,6 +102,19 @@ xe_gem_create(struct iris_bufmgr *bufmgr,
+@@ -102,6 +103,19 @@ xe_gem_create(struct iris_bufmgr *bufmgr,
     if (alloc_flags & BO_ALLOC_PROTECTED)
        gem_create.extensions = (uintptr_t)&pxp_ext;
  
@@ -83,7 +167,7 @@ index 84cd676..4c4fd89 100644
     drmFreeVersion(version);
  
 diff --git a/src/intel/dev/meson.build b/src/intel/dev/meson.build
-index 5085af1..beaa44d 100644
+index 6e56a36..486d852 100644
 --- a/src/intel/dev/meson.build
 +++ b/src/intel/dev/meson.build
 @@ -27,6 +27,7 @@ files_libintel_dev += files(
@@ -95,12 +179,12 @@ index 5085af1..beaa44d 100644
  
  inc_intel_dev_virtio += [
 diff --git a/src/intel/dev/virtio/i915_virtio_ccmd.c b/src/intel/dev/virtio/i915_virtio_ccmd.c
-index bfc8cc5..b74da71 100644
+index 32bbda5..ff86ba1 100644
 --- a/src/intel/dev/virtio/i915_virtio_ccmd.c
 +++ b/src/intel/dev/virtio/i915_virtio_ccmd.c
-@@ -705,6 +705,72 @@ intel_virtio_ioctl(int fd, unsigned long cmd, void *req)
- 
-    int orig_errno = errno;
+@@ -709,6 +709,73 @@ intel_virtio_ioctl(int fd, unsigned long cmd, void *req)
+       return ioctl(fd, cmd, req);
+    }
  
 +#define IOC_MASKED_XE(IOC) ((IOC) & ~IOCSIZE_MASK)
 +
@@ -167,6 +251,7 @@ index bfc8cc5..b74da71 100644
 +   }
 +
 +#undef IOC_MASKED_XE
++
 +
     /*
      * Special case for legacy ioctls that have same NR as extended ioctl
@@ -304,7 +389,7 @@ index f520beb..b3d8362 100644
  #endif /* INTEL_VIRTIO_PRIV_H_ */
 diff --git a/src/intel/dev/virtio/xe_virtio_ccmd.c b/src/intel/dev/virtio/xe_virtio_ccmd.c
 new file mode 100644
-index 0000000..0879945
+index 0000000..dc359f8
 --- /dev/null
 +++ b/src/intel/dev/virtio/xe_virtio_ccmd.c
 @@ -0,0 +1,313 @@
@@ -803,7 +888,7 @@ index 0000000..676ce2d
 +
 +#endif /* XE_VIRTIO_PROTO_H_ */
 diff --git a/src/intel/dev/xe/intel_device_info.c b/src/intel/dev/xe/intel_device_info.c
-index b026b36..7de7c65 100644
+index f3359ef..3f23049 100644
 --- a/src/intel/dev/xe/intel_device_info.c
 +++ b/src/intel/dev/xe/intel_device_info.c
 @@ -28,8 +28,10 @@
@@ -851,7 +936,7 @@ index b026b36..7de7c65 100644
  static void *
  xe_query_alloc_fetch(int fd, uint32_t query_id, int32_t *len)
  {
-@@ -103,17 +132,21 @@ intel_device_info_xe_query_regions(int fd, struct intel_device_info *devinfo,
+@@ -105,17 +134,21 @@ intel_device_info_xe_query_regions(int fd, struct intel_device_info *devinfo,
  
        switch (region->mem_class) {
        case DRM_XE_MEM_REGION_CLASS_SYSMEM: {
@@ -877,18 +962,18 @@ index b026b36..7de7c65 100644
        }
        case DRM_XE_MEM_REGION_CLASS_VRAM: {
 diff --git a/src/virtio/virtio-gpu/drm_hw.h b/src/virtio/virtio-gpu/drm_hw.h
-index 9f7244c..4774ab8 100644
+index 3a4f35f..df6d397 100644
 --- a/src/virtio/virtio-gpu/drm_hw.h
 +++ b/src/virtio/virtio-gpu/drm_hw.h
-@@ -31,6 +31,7 @@ struct virgl_renderer_capset_drm {
- #define VIRTGPU_DRM_CONTEXT_MSM      1
+@@ -32,6 +32,7 @@ struct virgl_renderer_capset_drm {
  #define VIRTGPU_DRM_CONTEXT_AMDGPU   2
  #define VIRTGPU_DRM_CONTEXT_I915     3
+ #define VIRTGPU_DRM_CONTEXT_PANFROST 5
 +#define VIRTGPU_DRM_CONTEXT_XE       6
     uint32_t context_type;
     uint32_t pad;
     union {
-@@ -69,6 +70,14 @@ struct virgl_renderer_capset_drm {
+@@ -70,6 +71,14 @@ struct virgl_renderer_capset_drm {
           uint32_t pci_domain;
           uint32_t pci_device_id;
        } intel;  /* context_type == VIRTGPU_DRM_CONTEXT_I915 */
@@ -903,86 +988,3 @@ index 9f7244c..4774ab8 100644
     } u;
  };
  
-
-diff --git a/src/gallium/drivers/iris/iris_bufmgr.c b/src/gallium/drivers/iris/iris_bufmgr.c
-index 0950ecd..e005c67 100644
---- a/src/gallium/drivers/iris/iris_bufmgr.c
-+++ b/src/gallium/drivers/iris/iris_bufmgr.c
-@@ -1302,7 +1302,7 @@ iris_bo_alloc(struct iris_bufmgr *bufmgr,
-          goto err_free;
- 
-       if (!bufmgr->kmd_backend->gem_vm_bind(bo, flags))
--         goto err_vm_alloc;
-+         goto err_free;
-    }
- 
-    bo->name = name;
-@@ -1330,10 +1330,6 @@ iris_bo_alloc(struct iris_bufmgr *bufmgr,
- 
-    return bo;
- 
--err_vm_alloc:
--   simple_mtx_lock(&bufmgr->lock);
--   vma_free(bufmgr, bo->address, bo->size);
--   simple_mtx_unlock(&bufmgr->lock);
- err_free:
-    simple_mtx_lock(&bufmgr->lock);
-    bo_free(bo);
-@@ -1506,10 +1502,10 @@ iris_bo_gem_create_from_name(struct iris_bufmgr *bufmgr,
-       goto err_free;
- 
-    if (!iris_bo_set_prime_fd(bo))
--      goto err_vm_alloc;
-+      goto err_free;
- 
-    if (!bufmgr->kmd_backend->gem_vm_bind(bo, flags))
--      goto err_vm_alloc;
-+      goto err_free;
- 
-    _mesa_hash_table_insert(bufmgr->handle_table, &bo->gem_handle, bo);
-    _mesa_hash_table_insert(bufmgr->name_table, &bo->real.global_name, bo);
-@@ -1520,8 +1516,6 @@ out:
-    simple_mtx_unlock(&bufmgr->lock);
-    return bo;
- 
--err_vm_alloc:
--   vma_free(bufmgr, bo->address, bo->size);
- err_free:
-    bo_free(bo);
-    simple_mtx_unlock(&bufmgr->lock);
-@@ -2059,7 +2053,7 @@ iris_bo_import_dmabuf(struct iris_bufmgr *bufmgr, int prime_fd,
-       goto err_free;
- 
-    if (!bufmgr->kmd_backend->gem_vm_bind(bo, flags))
--      goto err_vm_alloc;
-+      goto err_free;
- 
-    _mesa_hash_table_insert(bufmgr->handle_table, &bo->gem_handle, bo);
- 
-@@ -2075,8 +2069,6 @@ out:
- 
-    return bo;
- 
--err_vm_alloc:
--   vma_free(bufmgr, bo->address, bo->size);
- err_free:
-    bo_free(bo);
-    simple_mtx_unlock(&bufmgr->lock);
-@@ -2320,7 +2312,7 @@ intel_aux_map_buffer_alloc(void *driver_ctx, uint32_t size)
-       goto err_free;
- 
-    if (!bufmgr->kmd_backend->gem_vm_bind(bo, 0))
--      goto err_vm_alloc;
-+      goto err_free;
- 
-    simple_mtx_unlock(&bufmgr->lock);
- 
-@@ -2336,8 +2328,6 @@ intel_aux_map_buffer_alloc(void *driver_ctx, uint32_t size)
-    buf->map = iris_bo_map(NULL, bo, MAP_WRITE | MAP_RAW);
-    return buf;
- 
--err_vm_alloc:
--   vma_free(bufmgr, bo->address, bo->size);
- err_free:
-    free(buf);
-    bo_free(bo);

@@ -22,10 +22,10 @@ unbind also moves the Xe bind timeline past the point used by the failed bind.
 
 ---
 diff --git a/src/gallium/drivers/iris/iris_bufmgr.c b/src/gallium/drivers/iris/iris_bufmgr.c
-index 0950ecd..e005c67 100644
+index 7e738bb..76add27 100644
 --- a/src/gallium/drivers/iris/iris_bufmgr.c
 +++ b/src/gallium/drivers/iris/iris_bufmgr.c
-@@ -1302,7 +1302,7 @@ iris_bo_alloc(struct iris_bufmgr *bufmgr,
+@@ -1328,7 +1328,7 @@ iris_bo_alloc(struct iris_bufmgr *bufmgr,
           goto err_free;
  
        if (!bufmgr->kmd_backend->gem_vm_bind(bo, flags))
@@ -34,7 +34,7 @@ index 0950ecd..e005c67 100644
     }
  
     bo->name = name;
-@@ -1330,10 +1330,6 @@ iris_bo_alloc(struct iris_bufmgr *bufmgr,
+@@ -1356,10 +1356,6 @@ iris_bo_alloc(struct iris_bufmgr *bufmgr,
  
     return bo;
  
@@ -45,7 +45,7 @@ index 0950ecd..e005c67 100644
  err_free:
     simple_mtx_lock(&bufmgr->lock);
     bo_free(bo);
-@@ -1506,10 +1502,10 @@ iris_bo_gem_create_from_name(struct iris_bufmgr *bufmgr,
+@@ -1532,10 +1528,10 @@ iris_bo_gem_create_from_name(struct iris_bufmgr *bufmgr,
        goto err_free;
  
     if (!iris_bo_set_prime_fd(bo))
@@ -58,16 +58,18 @@ index 0950ecd..e005c67 100644
  
     _mesa_hash_table_insert(bufmgr->handle_table, &bo->gem_handle, bo);
     _mesa_hash_table_insert(bufmgr->name_table, &bo->real.global_name, bo);
-@@ -1520,8 +1516,6 @@ out:
+@@ -1546,10 +1542,6 @@ out:
     simple_mtx_unlock(&bufmgr->lock);
     return bo;
  
 -err_vm_alloc:
 -   vma_free(bufmgr, bo->address, bo->size);
+-   /* clear bo->address to prevent double free in bo_close() */
+-   bo->address = 0;
  err_free:
     bo_free(bo);
     simple_mtx_unlock(&bufmgr->lock);
-@@ -2059,7 +2053,7 @@ iris_bo_import_dmabuf(struct iris_bufmgr *bufmgr, int prime_fd,
+@@ -2102,7 +2094,7 @@ iris_bo_import_dmabuf(struct iris_bufmgr *bufmgr, int prime_fd,
        goto err_free;
  
     if (!bufmgr->kmd_backend->gem_vm_bind(bo, flags))
@@ -76,7 +78,7 @@ index 0950ecd..e005c67 100644
  
     _mesa_hash_table_insert(bufmgr->handle_table, &bo->gem_handle, bo);
  
-@@ -2075,8 +2069,6 @@ out:
+@@ -2118,8 +2110,6 @@ out:
  
     return bo;
  
@@ -85,7 +87,7 @@ index 0950ecd..e005c67 100644
  err_free:
     bo_free(bo);
     simple_mtx_unlock(&bufmgr->lock);
-@@ -2320,7 +2312,7 @@ intel_aux_map_buffer_alloc(void *driver_ctx, uint32_t size)
+@@ -2363,7 +2353,7 @@ intel_aux_map_buffer_alloc(void *driver_ctx, uint32_t size)
        goto err_free;
  
     if (!bufmgr->kmd_backend->gem_vm_bind(bo, 0))
@@ -94,7 +96,7 @@ index 0950ecd..e005c67 100644
  
     simple_mtx_unlock(&bufmgr->lock);
  
-@@ -2336,8 +2328,6 @@ intel_aux_map_buffer_alloc(void *driver_ctx, uint32_t size)
+@@ -2379,8 +2369,6 @@ intel_aux_map_buffer_alloc(void *driver_ctx, uint32_t size)
     buf->map = iris_bo_map(NULL, bo, MAP_WRITE | MAP_RAW);
     return buf;
  
